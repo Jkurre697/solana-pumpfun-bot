@@ -1,0 +1,7 @@
+source_commit=9290bc9fb72a49f2955bada2ad3ff4b0d0f1df48
+source_repo=https://github.com/Jkurre697/solana-pumpfun-bot
+upstream_repo=https://github.com/DeeKalshiWay/solana-pumpfun-bot
+license=MIT (LICENSE at repository root; Copyright (c) 2026)
+mode=upstream decision modules, isolated
+not_running=comparison was not started on the review machine
+baseline=/workspace/pumpfun-sniper was not present and was not modified

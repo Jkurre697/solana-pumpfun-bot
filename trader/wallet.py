@@ -4,12 +4,21 @@ Solana wallet setup, balance checking, and keypair management.
 Uses solders for keypair handling and aiohttp for RPC calls.
 """
 
+import os
 import time
 
 import aiohttp
 import base58
 from loguru import logger
 from solders.keypair import Keypair
+
+
+def _refuse_paper_compare(action: str) -> None:
+    if os.getenv("PAPER_COMPARE_LOCK") == "1":
+        raise RuntimeError(
+            f"PAPER_COMPARE_LOCK=1 refuses {action}. "
+            "The paper comparison must not load a keypair."
+        )
 
 from config import PRIVATE_KEY, RPC_URL
 
@@ -18,6 +27,7 @@ class SolanaWallet:
     """Manages keypair and SOL/token balance queries."""
 
     def __init__(self):
+        _refuse_paper_compare("SolanaWallet()")
         self.keypair = self._load_keypair()
         self.pubkey  = self.keypair.pubkey()
         self.session: aiohttp.ClientSession = None
@@ -31,6 +41,7 @@ class SolanaWallet:
 
     def _load_keypair(self) -> Keypair:
         """Load keypair from base58 private key string."""
+        _refuse_paper_compare("keypair load")
         try:
             secret = base58.b58decode(PRIVATE_KEY)
             return Keypair.from_bytes(secret)

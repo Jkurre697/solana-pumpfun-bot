@@ -87,3 +87,6 @@ fix.py
 manual_trade.py
 _restart_clean.ps1
 *.tmp
+
+# Isolated paper-comparison state. Never the baseline bot's directory.
+paper_compare_state/

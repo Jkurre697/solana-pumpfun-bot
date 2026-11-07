@@ -66,6 +66,8 @@ def send_alert(text: str) -> None:
     Safe to call from any async context. If no event loop is running
     (e.g. from a sync code path), runs the post synchronously instead.
     """
+    if os.getenv("PAPER_COMPARE_LOCK") == "1":
+        return
     if not _ready():
         return
     try:

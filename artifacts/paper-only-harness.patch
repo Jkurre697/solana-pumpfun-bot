@@ -1,0 +1,2412 @@
+diff --git a/.gitignore b/.gitignore
+index 38fbe20..28f4239 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -87,3 +87,6 @@ fix.py
+ manual_trade.py
+ _restart_clean.ps1
+ *.tmp
++
++# Isolated paper-comparison state. Never the baseline bot's directory.
++paper_compare_state/
+diff --git a/artifacts/PINNED_COMMIT.txt b/artifacts/PINNED_COMMIT.txt
+new file mode 100644
+index 0000000..8bfaaf3
+--- /dev/null
++++ b/artifacts/PINNED_COMMIT.txt
+@@ -0,0 +1,7 @@
++source_commit=9290bc9fb72a49f2955bada2ad3ff4b0d0f1df48
++source_repo=https://github.com/Jkurre697/solana-pumpfun-bot
++upstream_repo=https://github.com/DeeKalshiWay/solana-pumpfun-bot
++license=MIT (LICENSE at repository root; Copyright (c) 2026)
++mode=upstream decision modules, isolated
++not_running=comparison was not started on the review machine
++baseline=/workspace/pumpfun-sniper was not present and was not modified
+diff --git a/artifacts/SECURITY_REVIEW.md b/artifacts/SECURITY_REVIEW.md
+new file mode 100644
+index 0000000..54f0be7
+--- /dev/null
++++ b/artifacts/SECURITY_REVIEW.md
+@@ -0,0 +1,192 @@
++# Security and paper-comparison review
++
++Review date: 2026-11-06 (America/New_York).
++Fork reviewed: https://github.com/Jkurre697/solana-pumpfun-bot
++Upstream: https://github.com/DeeKalshiWay/solana-pumpfun-bot
++Commit reviewed: `9290bc9fb72a49f2955bada2ad3ff4b0d0f1df48`
++("Add disclaimer: educational template, no profit claims", 2026-11-04 18:36 UTC).
++
++This was a static review of source, license, dependency manifests, and
++install entrypoints. Unreviewed installers were not executed.
++`python main.py` was not started. No wallet was loaded. No transaction
++was signed or sent. No Telegram, email, or other outbound message was
++sent. The baseline directory `/workspace/pumpfun-sniper` is not on this
++machine and was not modified. The comparison is not running.
++
++## Verdict
++
++No obfuscated payload, hardcoded attacker webhook, or hidden key
++exfiltration was found in the Python, shell, PowerShell, Docker, or
++workflow files that were searched.
++
++The repository is still a real trading bot. Live signing is one
++environment flag away from the default paper path. That is an explicit
++blocker for running `main.py`, Docker, or `deploy/install.sh` as the
++comparison. The paper harness added beside it refuses those paths.
++It is safe to self-check offline. Starting `python -m paper_only` is a
++separate decision for the parent machine: it opens public read-only
++market feeds and writes only under `paper_compare_state/`.
++
++Nothing in the README paper curve, the graduation-sniper notes, or this
++harness is a verified profit result. Upstream's README already says
++paper pnl was concentrated in a few tickers (about 68% in three names
++in the quoted sqlite excerpt) and that thresholds were tuned on that
++history.
++
++## License
++
++`LICENSE` is MIT, Copyright (c) 2026, plus a non-advice risk paragraph.
++GitHub reports the license as "Other" because of that extra paragraph.
++The copyright notice and permission text were left unchanged.
++Attribution in this review: DeeKalshiWay is the upstream author of the
++strategy code; this fork is Jkurre697/solana-pumpfun-bot.
++
++## What was not executed
++
++- `deploy/install.sh` (root, creates user `pump`, rsyncs to `/opt/pump_bot`, `pip install`, installs and **starts** systemd)
++- `deploy/pump_bot.service` (`EnvironmentFile` `.env`, `ExecStart` `main.py`, `Restart=always`)
++- `Dockerfile` / `docker-compose.yml` (`CMD python -u main.py`, `env_file: .env`)
++- `make-dashboard.sh` (documents `curl -sSL .../make-dashboard.sh | bash`, clones upstream, pip-installs, starts `main.py`; default dashboard password in the script is `test123`)
++- `install_*.ps1`, `run_*.ps1`, `start_bot.bat`, `open_firewall.ps1` (Task Scheduler persistence and a firewall opening for the dashboard)
++- `python main.py`
++- `tools/graduation_sniper.py`, `tools/preflight.py`, `tools/control_bot.py`
++- Dependency installers other than a direct `pip install` of the declared
++  runtime and test packages, with `playwright` left out of the runtime set
++  used to execute tests. `playwright` is declared and unused.
++
++## Dependency and cost notes
++
++`requirements.txt`: aiohttp, playwright, tweepy, telethon, requests,
++websockets, rich, python-dotenv, base58, loguru, solders. No `setup.py`,
++no npm `postinstall`, no hashed pins. `requirements-dev.txt` includes
++that file plus pytest, pytest-asyncio, mypy, ruff.
++
++`playwright` is not imported. `deploy/install.sh` and the Dockerfile
++delete that line before install. `tweepy` and `telethon` are optional
++imports inside `detector/social_monitor.py`. The harness does not start
++that monitor.
++
++No paid API is required for the harness.
++
++| Service | Role in the original bot | Harness |
++|---|---|---|
++| Helius RPC | Recommended in `.env.example`. Paid tiers exist. | Cleared. Public RPC only. |
++| Birdeye | Optional key. Skipped in code when unset. | Cleared. Not called. |
++| Twitter/X API | Influencer and social monitors. Paid tiers exist. | Cleared. Not started. |
++| Telegram user API (Telethon) | Channel monitor. | Cleared. Not started. |
++| Telegram bot API | Trade alerts, graduation alerts, control bot. | Cleared. `send_alert` returns under the lock. |
++| SMTP | Daily email report. | Cleared. `send_report` returns under the lock. |
++| Jupiter quote/swap | Price fallback and live swaps. | Not called. |
++| Jito block engine | Live `sendTransaction` lane. Free tier, still a submit path. | URL blocked. Region cleared. |
++| PumpPortal data WebSocket | Launch stream. Public, no key. Can 403. | Used for launches only. |
++| PumpPortal `/api/trade-local` | Builds a transaction for the signer. | URL blocked. Not called. |
++| pump.fun frontend API | Metadata polling. Public. | Used by the existing tracker when the harness is launched. |
++| DexScreener | Public market data. Rate limited. | Fallback price, and scorer enrichment for older tokens. |
++| Public Solana RPC and PublicNode | Account reads. Rate limited. | `getAccountInfo` only in the harness price reader. |
++
++Dollar cost of the harness feeds is zero while those public endpoints
++keep answering. The cost of a bad public-RPC hour is missing data, not
++an invoice. Missing data is recorded as gaps, not as strategy pnl.
++
++Pump.fun's own swap fee is not paid, because nothing is submitted. The
++1% per side in the paper model is an accounting stand-in for that fee,
++not a chain debit.
++
++## Live-trading and secret paths
++
++These exist and are intentional product features, not hidden malware.
++They are the reason `main.py` is not the comparison process.
++
++- `config.py` defaults `PAPER_TRADING` to true, then `load_dotenv(override=True)`. A `.env` with `PAPER_TRADING=false` turns on live trading and overrides the code default.
++- `SOLANA_PRIVATE_KEY` is read into `config.PRIVATE_KEY`. `trader/wallet.py` base58-decodes it into a `solders` keypair.
++- `trader/executor.py` and `trader/pumpportal_executor.py` sign a versioned transaction and POST JSON-RPC `sendTransaction`. PumpPortal's trade-local endpoint returns the unsigned bytes. Jito regional URLs are additional submit lanes.
++- `trader/local_tx_builder.py` builds pump.fun buy/sell transactions. `USE_LOCAL_TX_BUILD` defaults false. Fee recipient constant `CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM` is the address the file documents as the pump.fun fee recipient. It is not used by the paper harness. This review did not re-fetch the on-chain global account.
++- `main.py` constructs `SolanaWallet` and `TradeExecutor` when `PAPER_TRADING` is false. The paper branch uses `PaperWallet` (pubkey string `PAPER_WALLET_SIMULATED`) and `PaperExecutor` (signatures prefixed `PAPER_`).
++- `logger/web_server.py` binds `0.0.0.0:8765`. Basic auth is off unless both dashboard env vars are set. POST handlers can emergency-stop and force-sell. The harness does not start it.
++- `logger/telegram_alerts.py` POSTs to `api.telegram.org` when both bot token and chat id are set. `logger/daily_report.py` sends SMTP mail when configured.
++- `tools/control_bot.py` can edit `.env` and start processes, and it constructs `TradeExecutor`.
++- `tools/preflight.py` derives a keypair from `SOLANA_PRIVATE_KEY` and queries balance.
++- `tools/graduation_sniper.py` is a separate paper book (size 0.25 SOL, its own friction, state under `logs/`). A search of that file found no keypair load and no `sendTransaction`. It does call Telegram alerts when tokens are set. It was not started. It is not the strategy this harness runs.
++- PumpPortal and pump.fun clients set a browser `User-Agent` and `Origin`. That is client disguise against a public API, not a callback to another host.
++- `main.py` PID check on Windows shells out to PowerShell `Get-CimInstance`. The harness does not use that lock.
++
++Search terms that did not show a secret sink: `webhook.site`, Discord webhook URLs, paste sites, `requestAirdrop`, a second hardcoded destination wallet. `base64.b64decode` uses are transaction or RPC account bytes and HTTP Basic auth for the dashboard, not a bundled payload.
++
++## Paper-mode escape paths in the original process
++
++Running `main.py` with the default flag is paper, until any of these:
++
++1. `.env` or the shell sets `PAPER_TRADING=false` and a real key. Dotenv uses `override=True`, so the file wins over the environment.
++2. systemd and Docker load `.env` and start `main.py` with no forced paper flag.
++3. The dashboard force-sell calls `RiskManager._force_sell`, which calls `executor.sell`. In live mode that is a real sell.
++4. `SYNTHETIC_INJECT` is refused when not in paper. That guard does not cover the live flag itself.
++5. Auto-tune rewrites the score floor from recent trades and persists `logs/auto_tune_state.json`. A comparison that wants frozen thresholds cannot leave that loop on.
++6. Adaptive sizing changes the next order with win rate. That is compounding-style sizing, which this comparison is not supposed to use.
++7. Paper state files are relative `logs/`. A second process in the same directory reloads the other bot's wallet, positions, and tuner state.
++
++The harness answers those by refusing to be `main.py`, skipping dotenv, blanking secrets, raising in the signer constructors, blocking submit URLs and RPC methods, forcing auto-tune and adaptive size off, and `chdir` into a dedicated state directory.
++
++## Strategy identity
++
++Two paper strategies live in this commit.
++
++1. **Main pipeline.** `PumpFunMonitor` plus `SignalScorer` plus `RiskManager`. This is the book the README ties to the concentrated paper pnl. The harness runs these modules.
++2. **Graduation sniper.** `tools/graduation_sniper.py`, described in its own docstring as the later scalp pivot, 0.25 SOL, different exits. The harness does not run it. Calling a graduation-sniper result a test of the README strategy would be false.
++
++The harness is **upstream decision modules, isolated**. It is not a line-by-line reimplementation of the scorer, and it is not an unmodified `main.py` run. Fidelity gaps, all stated in `paper_only/README.md` and written again into `logs/PAPER_COMPARE_PIN.json` on launch:
++
++- README ladder/stop/time-exit table disagrees with `config.py`. Frozen values are the code defaults at the pin (score floor 60, curve band 30–80%, take-profit +50/100/200 selling 25%, stop 15%, panic 25%, time exit 5 minutes, early rug −5% inside 60 seconds, no-movement 90 seconds inside ±3%, max 3 positions, 0.50 SOL exposure, symbol cap 10% of the 1.0 SOL book).
++- Entry size is forced to 0.1 SOL. `MAX_POSITION_PCT=1` is the override that stops the 5% wallet clip. Adaptive multipliers are forced to 1 and the feature is off.
++- Cost model is 1% per side, 2% adverse slippage per side, 0.0005 SOL priority per transaction. Upstream realistic paper friction is not used. Upstream configured live priority caps (0.001 buy / 0.005 sell) are not used.
++- Jupiter is not queried. Post-migration marks fall through to DexScreener.
++- Twitter, Telegram, email, dashboard, trending scanner, and social monitor are not started. Influencer bonuses stay at zero.
++- Launch detection is PumpPortal `subscribeNewToken`, not the baseline's `logsSubscribe` primary/PublicNode pair. PublicNode is only the backup for bonding-curve account reads.
++- Host-freeze handling (pause entries 90 seconds, flatten at a stall of at least 300 seconds, separate clean / freeze-hit / data-gap stats) is harness policy around the strategy. Detection starts at a 5 second late heartbeat. Upstream `RiskManager` does not implement that policy.
++
++## Tests
++
++`tests/test_paper_only_safety.py` (offline):
++
++- Every `config.py` `_env_*` knob is set by the lock.
++- Buy/sell math matches the 0.1 / 1% / 2% / 0.0005 model, including wallet cash.
++- A non-0.1 size is rejected by the executor and by the sizing gate.
++- Freeze, flatten, entry pause, and bucket files stay separate from clean legs.
++- `sendTransaction`, `sendRawTransaction`, PumpPortal trade-local, and Jito submit URLs raise. `getAccountInfo` does not.
++- State paths named `pumpfun-sniper`, and the repo root, are refused.
++- Runtime harness modules do not import the signer modules.
++- `--self-check` in a fresh process ignores a hostile `.env` and a hostile shell (`PAPER_TRADING=false`, a dummy key, Helius URL, score floor 1) and still reports paper, 0.1 SOL, score floor 60, empty key.
++- `main.py` under the lock exits 3.
++- An import blocker refuses `trader.executor`.
++
++`tests/test_paper_executor.py` gained a loop fallback so those sync tests still run after pytest-asyncio 1.x closes the main-thread loop. That is test-only.
++
++Full `pytest tests` passed in this review environment after that fallback (Python 3.12). `mypy tests/` passed. `ruff check` passed on the touched files.
++
++## Files
++
++| Path | Role |
++|---|---|
++| `paper_only/README.md` | Launch instructions for the parent machine |
++| `paper_only/` | Lock, costs, executor, feed health, runner, offline self-check |
++| `tests/test_paper_only_safety.py` | No-sign / no-send and fixed-cost tests |
++| `config.py`, `main.py`, `trader/wallet.py`, `trader/executor.py`, `trader/pumpportal_executor.py`, `trader/local_tx_builder.py`, `logger/telegram_alerts.py`, `logger/daily_report.py` | Lock refusals. Default behavior is unchanged when the lock is unset. |
++| `artifacts/SECURITY_REVIEW.md` | This note |
++| `artifacts/PINNED_COMMIT.txt` | Commit pin |
++| `artifacts/paper-only-harness.patch` | Diff against `9290bc9` for the parent to apply on a clean tree. Do not apply it on top of the PR branch. |
++
++## Parent launch, after you accept the review
++
++The comparison is not running here. Nothing has been installed as a service.
++
++```bash
++grep -v '^playwright' requirements.txt | python3 -m pip install -r /dev/stdin
++python3 -m pip install pytest pytest-asyncio
++python3 -m pytest tests/test_paper_only_safety.py
++python3 -m paper_only --self-check
++python3 -m paper_only
++```
++
++Read `paper_only/README.md` before the last command. Stop with Ctrl-C.
++Results, if you choose to run it, land in `paper_compare_state/logs/`.
++Do not copy that directory onto the baseline bot, and do not reset the
++baseline's state or settings.
+diff --git a/config.py b/config.py
+index 2416a10..574a425 100644
+--- a/config.py
++++ b/config.py
+@@ -16,7 +16,17 @@ git commit needed.
+ import json
+ import os
+ 
+-from dotenv import load_dotenv
++# paper_only sets PAPER_COMPARE_LOCK before import. A nearby .env must not
++# be able to flip PAPER_TRADING or inject SOLANA_PRIVATE_KEY into that process.
++_PAPER_COMPARE_LOCK = os.getenv("PAPER_COMPARE_LOCK") == "1"
++if _PAPER_COMPARE_LOCK:
++    os.environ["PAPER_TRADING"] = "true"
++    os.environ["SOLANA_PRIVATE_KEY"] = ""
++
++    def load_dotenv(*_args, **_kwargs):
++        return False
++else:
++    from dotenv import load_dotenv
+ 
+ load_dotenv(override=True)
+ 
+diff --git a/logger/daily_report.py b/logger/daily_report.py
+index 3e6eaf8..51c491a 100644
+--- a/logger/daily_report.py
++++ b/logger/daily_report.py
+@@ -244,6 +244,9 @@ class DailyReporter:
+ 
+     # ── Send ────────────────────────────────────────────────────────────────
+     def send_report(self):
++        if os.getenv("PAPER_COMPARE_LOCK") == "1":
++            logger.info("[REPORT] email suppressed by PAPER_COMPARE_LOCK")
++            return
+         if not _enabled():
+             return
+         stats = self._gather()
+diff --git a/logger/telegram_alerts.py b/logger/telegram_alerts.py
+index 3f63aeb..8a7cf85 100644
+--- a/logger/telegram_alerts.py
++++ b/logger/telegram_alerts.py
+@@ -66,6 +66,8 @@ def send_alert(text: str) -> None:
+     Safe to call from any async context. If no event loop is running
+     (e.g. from a sync code path), runs the post synchronously instead.
+     """
++    if os.getenv("PAPER_COMPARE_LOCK") == "1":
++        return
+     if not _ready():
+         return
+     try:
+diff --git a/main.py b/main.py
+index 6c9385b..eb475a6 100644
+--- a/main.py
++++ b/main.py
+@@ -442,6 +442,13 @@ def _install_global_error_handlers():
+ 
+ 
+ async def main():
++    if os.getenv("PAPER_COMPARE_LOCK") == "1":
++        logger.critical(
++            "Refusing main.py under PAPER_COMPARE_LOCK. "
++            "Use python -m paper_only from a clean checkout. "
++            "main.py can still reach live signing when PAPER_TRADING is false."
++        )
++        raise SystemExit(3)
+     setup_logging()
+     _install_global_error_handlers()
+     _acquire_pid_lock()
+diff --git a/paper_only/README.md b/paper_only/README.md
+new file mode 100644
+index 0000000..ef15f6c
+--- /dev/null
++++ b/paper_only/README.md
+@@ -0,0 +1,193 @@
++# Paper-only comparison harness
++
++This directory is an isolated way to exercise the **upstream decision
++modules** in this repository (`SignalScorer` and `RiskManager`) with
++fixed 0.1 SOL paper entries. It is not `python main.py`, it is not
++`tools/graduation_sniper.py`, and it is not a claim that the strategy
++makes money.
++
++The MIT license at the repository root applies. Copyright (c) 2026.
++Upstream project: https://github.com/DeeKalshiWay/solana-pumpfun-bot
++This fork: https://github.com/Jkurre697/solana-pumpfun-bot
++
++Pinned review commit for the strategy code this harness was written
++against:
++
++```
++9290bc9fb72a49f2955bada2ad3ff4b0d0f1df48
++```
++
++`logs/PAPER_COMPARE_PIN.json` records the git HEAD actually launched.
++
++## Do not run these
++
++They were reviewed and left unused. Several can install services, read
++a private key, or submit transactions:
++
++- `python main.py`
++- `deploy/install.sh` and `deploy/pump_bot.service`
++- `Dockerfile`, `docker compose`
++- `make-dashboard.sh` (also documents a `curl | bash` installer)
++- `install_*.ps1`, `run_*.ps1`, `start_bot.bat`, `open_firewall.ps1`
++- `tools/graduation_sniper.py` and `tools/preflight.py`
++- `tools/control_bot.py`, `tools/twitter_relay.py`
++
++Do not point `--state` at a `pumpfun-sniper` directory. That baseline
++bot is separate and must stay untouched.
++
++## What actually runs
++
++`python -m paper_only` imports the repository's scorer and risk manager
++after a lock is installed:
++
++- `PAPER_TRADING` is forced on.
++- `python-dotenv` is not loaded, so a nearby `.env` cannot flip the bot
++  live or supply `SOLANA_PRIVATE_KEY`.
++- `SolanaWallet`, `TradeExecutor`, `PumpPortalExecutor`, and the local
++  transaction builders raise if constructed.
++- HTTP calls whose JSON-RPC method submits a transaction are rejected.
++- Telegram and email sends return immediately.
++- Credentials for Helius, Birdeye, Twitter/X, Telegram, and SMTP are
++  cleared in the process environment.
++
++Fills are simulated in `paper_only/costs.py`. Nothing is signed.
++
++### Fixed size
++
++Every accepted entry is exactly **0.1 SOL** of curve notional. Adaptive
++sizing is off, so a winning book does not increase the next entry. If
++the upstream sizer would have used any other size, the harness skips
++the trade instead of taking a partial.
++
++Two upstream limits still apply and are frozen:
++
++- At most **3** open positions (`MAX_OPEN_POSITIONS`), not 4.
++- A symbol may receive only **10% of the 1.0 SOL starting book** over
++  the run, which is 0.1 SOL. A second 0.1 entry in the same symbol name
++  is refused. That is the upstream concentration cap, not a new rule.
++
++`MAX_POSITION_PCT` is set to 1 so the upstream 5% of-wallet clip does
++not shrink 0.1 SOL down to 0.05 SOL. That is a comparison override.
++It is recorded in `paper_only/frozen.py`.
++
++### Costs
++
++Independent of `trader/paper_executor.py`:
++
++| Item | Value |
++|---|---|
++| Entry notional | 0.1 SOL |
++| Fee | 1% of notional on the buy, 1% of gross proceeds on the sell |
++| Adverse slippage | 2% worse than mid, each side |
++| Priority | 0.0005 SOL per transaction |
++
++The buy fee and buy priority are **extra cash debits**. They are not
++subtracted from the 0.1 before the curve fill. `RiskManager` pnl does
++not include those entry debits. `logs/compare_trades.jsonl` stores both
++`risk_pnl_sol` and `cash_pnl_sol` (risk pnl minus the allocated entry
++fee and priority).
++
++Upstream's own paper simulator is different: size-based slippage, an
++MEV add-on, a 5% random failure, and priority caps of 0.001 SOL on
++buys and 0.005 SOL on sells. This harness does not use that simulator.
++Matching numbers to the README's paper curve would be a false claim.
++
++### Frozen rules versus the README table
++
++`config.py` at the pinned commit is what the scorer and risk manager
++execute. The README "strategy at a glance" table does not match it.
++Examples: the code take-profit ladder is +50/100/200% selling 25% each,
++the stop is 15%, and the time exit is 5 minutes. The README table says
+++75/300/800%, a 10% stop, and a 4 minute time exit. Thresholds are
++frozen from the code. Auto-tune is forced off so the score floor stays
++at 60.
++
++### Feeds
++
++No API key is required.
++
++- Launches: public PumpPortal WebSocket `wss://pumpportal.fun/api/data`,
++  method `subscribeNewToken`. This is not Solana `logsSubscribe`.
++- Prices: `getAccountInfo` on the pump.fun bonding-curve account, then
++  DexScreener if the curve account is gone.
++- RPC: `https://api.mainnet-beta.solana.com`, then
++  `https://solana-rpc.publicnode.com` for that account read only.
++
++Not called: Helius, Birdeye, Jupiter, Twitter/X, Telegram, the web
++dashboard, the graduation sniper.
++
++Public endpoints rate-limit and disconnect. PumpPortal answers 403
++when it rejects the client. The holder-concentration check fails open
++on RPC errors, which is existing scorer behavior, so a rate limit can
++let a trade through that a successful read would have blocked. Expect
++gaps. They are not evidence of edge.
++
++### Freezes and gaps
++
++A heartbeat that wakes more than 5 seconds late is a host freeze. New
++entries pause for 90 seconds. A single stall of at least 300 seconds
++flattens open positions. Silence of at least 15 seconds on the
++PumpPortal stream is a data gap. Closed legs are labeled `clean`,
++`freeze_hit`, or `data_gap` in `logs/compare_buckets.json`. Those
++buckets are separate on purpose. Do not add them into one profit number.
++
++The 5 second detection floor is a harness parameter. The 90 second
++pause and 300 second flatten match the comparison brief. They are not
++rules inside `RiskManager`.
++
++## Setup
++
++From a clean checkout of this fork, after you have read
++`artifacts/SECURITY_REVIEW.md`:
++
++```bash
++grep -v '^playwright' requirements.txt | python3 -m pip install -r /dev/stdin
++python3 -m pip install pytest pytest-asyncio
++python3 -m pytest tests/test_paper_only_safety.py
++python3 -m paper_only --self-check
++```
++
++`playwright` is listed in `requirements.txt` and is not imported.
++Leave it out. Do not run `deploy/install.sh`. `requirements-dev.txt`
++pulls `requirements.txt` unchanged, including playwright, so prefer
++the `grep` line above.
++
++`--self-check` does not open a socket and does not accept a private key.
++A `.env` that sets `PAPER_TRADING=false` must not change the result.
++
++## Launch
++
++Only after `--self-check` prints `paper-only self-check ok`:
++
++```bash
++python3 -m paper_only
++```
++
++State goes to `./paper_compare_state/` under the repository. That
++folder is gitignored. Logs:
++
++- `paper_compare_state/logs/PAPER_COMPARE_PIN.json`
++- `paper_compare_state/logs/compare_trades.jsonl`
++- `paper_compare_state/logs/compare_buckets.json`
++- `paper_compare_state/logs/feed_health.json`
++- `paper_compare_state/logs/pump_bot.log` (upstream logger, this state dir only)
++
++Stop with Ctrl-C. The process does not install a service and does not
++restart itself.
++
++Optional state directory, still not a `pumpfun-sniper` path and still
++not a folder that contains `.env`:
++
++```bash
++python3 -m paper_only --state /path/to/some-other-empty-dir
++```
++
++## How to read a result
++
++A finished run is a sample of this scorer and this risk manager on
++whatever the public feeds delivered, with the cost model above and
++with freeze and gap legs split out. It does not validate the README
++paper curve, the graduation-sniper notes, or live trading. Upstream's
++own README says paper pnl was concentrated in a handful of tickers.
++Treat a new run the same way: look at concentration before looking at
++a total.
+diff --git a/paper_only/__init__.py b/paper_only/__init__.py
+new file mode 100644
+index 0000000..fe3cef1
+--- /dev/null
++++ b/paper_only/__init__.py
+@@ -0,0 +1,8 @@
++"""Isolated paper-only comparison harness.
++
++This package runs upstream decision modules with fixed-size simulated
++fills. It does not load a wallet and it does not submit transactions.
++See paper_only/README.md. Nothing here is a profitability claim.
++"""
++
++__version__ = "0.1.0"
+diff --git a/paper_only/__main__.py b/paper_only/__main__.py
+new file mode 100644
+index 0000000..8cd8dd9
+--- /dev/null
++++ b/paper_only/__main__.py
+@@ -0,0 +1,45 @@
++"""python -m paper_only [--self-check] [--state DIR]
++
++Does not connect a wallet. --self-check stays offline.
++The default run opens public read-only market feeds. It is not started
++by importing this module.
++"""
++
++from __future__ import annotations
++
++import argparse
++import asyncio
++import sys
++from pathlib import Path
++
++from paper_only.lock import install_lock
++
++
++def main(argv: list[str] | None = None) -> int:
++    install_lock()
++    repo = Path(__file__).resolve().parents[1]
++    parser = argparse.ArgumentParser(
++        description="Isolated paper comparison. No wallet. No transaction sends.",
++    )
++    parser.add_argument(
++        "--self-check",
++        action="store_true",
++        help="Offline lock check. Does not open a feed.",
++    )
++    parser.add_argument(
++        "--state",
++        default="",
++        help="Dedicated state directory. Default: <repo>/paper_compare_state",
++    )
++    args = parser.parse_args(argv)
++    if args.self_check:
++        from paper_only.selfcheck import run_self_check
++        return run_self_check()
++    from paper_only.runner import launch
++    state = Path(args.state) if args.state else repo / "paper_compare_state"
++    asyncio.run(launch(state))
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/paper_only/book.py b/paper_only/book.py
+new file mode 100644
+index 0000000..70f6730
+--- /dev/null
++++ b/paper_only/book.py
+@@ -0,0 +1,95 @@
++"""Side ledger that keeps freeze-hit, data-gap, and clean legs apart.
++
++RiskManager still writes its own logs. This file does not rewrite them.
++Bucket PnL is not a profit result. Legs that overlap a host freeze are
++not mixed into the clean bucket.
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import time
++
++from paper_only.feedhealth import FeedHealth
++
++_BUCKETS = ("clean", "freeze_hit", "data_gap")
++
++
++class CompareBook:
++    def __init__(self, health: FeedHealth) -> None:
++        self.health = health
++        self._opens: dict[str, dict] = {}
++        self.counts = {name: {"n": 0, "risk_pnl_sol": 0.0, "cash_pnl_sol": 0.0} for name in _BUCKETS}
++
++    def on_open(self, mint: str, result: dict) -> None:
++        self._opens[mint] = {
++            "entry_wall": time.time(),
++            "notional": float(result.get("sol_spent") or 0.0),
++            "buy_fee": float(result.get("fee_sol") or 0.0),
++            "buy_priority": float(result.get("priority_sol") or 0.0),
++        }
++
++    def tag_record(self, record: dict) -> dict:
++        mint = record.get("mint", "")
++        meta = self._opens.get(mint) or {}
++        entry = float(record.get("entry_time") or meta.get("entry_wall") or time.time())
++        exit_t = float(record.get("exit_time") or time.time())
++        bucket = self.health.bucket(entry, exit_t)
++        notional = float(meta.get("notional") or 0.0)
++        invested = float(record.get("sol_invested") or 0.0)
++        fraction = (invested / notional) if notional > 0 else 1.0
++        buy_drag = (float(meta.get("buy_fee") or 0.0) + float(meta.get("buy_priority") or 0.0)) * fraction
++        risk_pnl = float(record.get("pnl_sol") or 0.0)
++        tagged = {
++            "mint": mint,
++            "symbol": record.get("symbol"),
++            "reason": record.get("reason"),
++            "partial": bool(record.get("partial")),
++            "entry_time": entry,
++            "exit_time": exit_t,
++            "sol_invested": invested,
++            "sol_received": record.get("sol_received"),
++            "risk_pnl_sol": risk_pnl,
++            "buy_cost_allocated_sol": buy_drag,
++            "cash_pnl_sol": risk_pnl - buy_drag,
++            "bucket": bucket,
++            "score": record.get("score"),
++        }
++        self.counts[bucket]["n"] += 1
++        self.counts[bucket]["risk_pnl_sol"] += risk_pnl
++        self.counts[bucket]["cash_pnl_sol"] += tagged["cash_pnl_sol"]
++        if not record.get("partial"):
++            self._opens.pop(mint, None)
++        self._append(tagged)
++        self.write_summary()
++        return tagged
++
++    def _append(self, tagged: dict) -> None:
++        os.makedirs("logs", exist_ok=True)
++        with open("logs/compare_trades.jsonl", "a", encoding="utf-8") as handle:
++            handle.write(json.dumps(tagged) + "\n")
++
++    def write_summary(self) -> None:
++        os.makedirs("logs", exist_ok=True)
++        payload = {
++            "note": (
++                "Buckets are mutually exclusive. Do not add them into a "
++                "profit claim. cash_pnl_sol subtracts the buy-side 1% fee "
++                "and 0.0005 SOL priority from the risk manager's pnl, which "
++                "does not include those entry debits."
++            ),
++            "buckets": self.counts,
++            "open_positions": len(self._opens),
++        }
++        tmp = "logs/compare_buckets.json.tmp"
++        with open(tmp, "w", encoding="utf-8") as handle:
++            json.dump(payload, handle, indent=2)
++        os.replace(tmp, "logs/compare_buckets.json")
++
++    def write_health(self) -> None:
++        os.makedirs("logs", exist_ok=True)
++        tmp = "logs/feed_health.json.tmp"
++        with open(tmp, "w", encoding="utf-8") as handle:
++            json.dump(self.health.snapshot(), handle, indent=2)
++        os.replace(tmp, "logs/feed_health.json")
+diff --git a/paper_only/costs.py b/paper_only/costs.py
+new file mode 100644
+index 0000000..d1d81da
+--- /dev/null
++++ b/paper_only/costs.py
+@@ -0,0 +1,69 @@
++"""Independent paper fills for the comparison book.
++
++These are not trader.paper_executor. Upstream's realistic sim uses
++size-dependent slippage, an MEV tax, a 5% fail lottery, and priority fees
++of up to 0.001 SOL on buys and 0.005 SOL on sells.
++
++This module uses the comparison cost assumptions:
++
++- fixed notional 0.1 SOL (the curve exposure, not a compounded balance)
++- 1% fee per side
++- 2% adverse slippage per side
++- 0.0005 SOL priority fee per transaction
++
++Buy cash leaving the wallet is notional + fee + priority. The fee and
++priority are extra debits, not taken out of the 0.1. Sell cash received is
++gross after adverse slippage, minus the 1% fee, minus 0.0005 SOL.
++"""
++
++from __future__ import annotations
++
++FIXED_ENTRY_SOL = 0.1
++FEE_RATE = 0.01
++ADVERSE_SLIPPAGE = 0.02
++PRIORITY_FEE_SOL = 0.0005
++
++
++def buy_fill(mid_price_sol_per_raw: float, notional: float = FIXED_ENTRY_SOL) -> dict:
++    """Simulate a buy at a worse price than mid. mid is SOL per raw token unit."""
++    if mid_price_sol_per_raw <= 0:
++        raise ValueError("mid price must be positive")
++    if notional <= 0:
++        raise ValueError("notional must be positive")
++    effective = mid_price_sol_per_raw * (1.0 + ADVERSE_SLIPPAGE)
++    tokens = int(notional / effective)
++    fee = notional * FEE_RATE
++    priority = PRIORITY_FEE_SOL
++    return {
++        "notional_sol": notional,
++        "mid_price": mid_price_sol_per_raw,
++        "effective_price": effective,
++        "tokens": tokens,
++        "fee_sol": fee,
++        "priority_sol": priority,
++        "cash_debit": notional + fee + priority,
++        "slippage": ADVERSE_SLIPPAGE,
++    }
++
++
++def sell_fill(tokens: int, mid_price_sol_per_raw: float) -> dict:
++    """Simulate a sell at a worse price than mid."""
++    if tokens <= 0:
++        raise ValueError("tokens must be positive")
++    if mid_price_sol_per_raw <= 0:
++        raise ValueError("mid price must be positive")
++    gross = tokens * mid_price_sol_per_raw * (1.0 - ADVERSE_SLIPPAGE)
++    fee = gross * FEE_RATE
++    priority = PRIORITY_FEE_SOL
++    received = gross - fee - priority
++    if received < 0:
++        received = 0.0
++    return {
++        "tokens": tokens,
++        "mid_price": mid_price_sol_per_raw,
++        "gross_sol": gross,
++        "fee_sol": fee,
++        "priority_sol": priority,
++        "sol_received": received,
++        "slippage": ADVERSE_SLIPPAGE,
++    }
+diff --git a/paper_only/executor.py b/paper_only/executor.py
+new file mode 100644
+index 0000000..20e4066
+--- /dev/null
++++ b/paper_only/executor.py
+@@ -0,0 +1,168 @@
++"""Paper executor with no signing surface.
++
++Fills come from paper_only.costs. Prices are marks supplied by the caller.
++Nothing in this class imports solders, builds a transaction, or talks to a
++trader endpoint.
++"""
++
++from __future__ import annotations
++
++import time
++
++from paper_only.costs import FIXED_ENTRY_SOL, buy_fill, sell_fill
++
++
++def mid_from_launch(token: dict | None) -> float:
++    """SOL per raw token unit, same conversion as trader.paper_executor.buy.
++
++    PumpPortal's vTokensInBondingCurve is treated as UI tokens and pump.fun
++    tokens use 6 decimals. Returns 0 when the launch payload has no reserves.
++    """
++    if not token:
++        return 0.0
++    v_sol = float(token.get("v_sol_in_bonding") or 0)
++    v_tokens = float(token.get("v_tokens_in_bonding") or 0)
++    if v_sol <= 0 or v_tokens <= 0:
++        return 0.0
++    return v_sol / (v_tokens * 1_000_000)
++
++
++class ComparisonPaperExecutor:
++    def __init__(self, wallet) -> None:
++        self.wallet = wallet
++        self._prices: dict[str, float] = {}
++        self._held: dict[str, int] = {}
++
++    async def start(self) -> None:
++        return None
++
++    async def stop(self) -> None:
++        return None
++
++    def update_price(self, mint: str, price_per_raw: float) -> None:
++        if price_per_raw and price_per_raw > 0:
++            self._prices[mint] = float(price_per_raw)
++
++    async def prebuild_sell_tx(self, token_mint: str):
++        """Compat shim. There is no transaction to prebuild."""
++        return None
++
++    def _resolve_tokens(self, mint: str, raw) -> int:
++        held = self._held.get(mint, 0)
++        if isinstance(raw, str):
++            text = raw.strip()
++            if text.endswith("%"):
++                try:
++                    pct = float(text[:-1])
++                except ValueError:
++                    return 0
++                return max(0, int(held * (pct / 100.0)))
++            try:
++                return max(0, int(float(text)))
++            except ValueError:
++                return 0
++        try:
++            return max(0, int(raw))
++        except (TypeError, ValueError):
++            return 0
++
++    async def buy(self, token_mint: str, sol_amount: float, token: dict | None = None) -> dict:
++        now = time.time()
++        if abs(float(sol_amount) - FIXED_ENTRY_SOL) > 1e-9:
++            return {
++                "success": False,
++                "error": "non_fixed_size",
++                "venue": "paper",
++                "type": "buy",
++                "mint": token_mint,
++                "timestamp": now,
++            }
++        mid = mid_from_launch(token) or self._prices.get(token_mint, 0.0)
++        if mid <= 0:
++            return {
++                "success": False,
++                "error": "no_price",
++                "venue": "paper",
++                "type": "buy",
++                "mint": token_mint,
++                "timestamp": now,
++            }
++        fill = buy_fill(mid, FIXED_ENTRY_SOL)
++        if fill["tokens"] <= 0:
++            return {
++                "success": False,
++                "error": "zero_fill",
++                "venue": "paper",
++                "type": "buy",
++                "mint": token_mint,
++                "timestamp": now,
++            }
++        balance = await self.wallet.get_sol_balance()
++        if balance < fill["cash_debit"]:
++            return {
++                "success": False,
++                "error": "insufficient_paper_balance",
++                "venue": "paper",
++                "type": "buy",
++                "mint": token_mint,
++                "timestamp": now,
++            }
++        self.wallet.deduct(fill["cash_debit"])
++        self._held[token_mint] = self._held.get(token_mint, 0) + fill["tokens"]
++        self._prices[token_mint] = mid
++        return {
++            "success": True,
++            "signature": f"PAPER_{token_mint[:8]}_{int(now)}",
++            "type": "buy",
++            "mint": token_mint,
++            "sol_spent": FIXED_ENTRY_SOL,
++            "tokens_expected": fill["tokens"],
++            "fee_sol": fill["fee_sol"],
++            "priority_sol": fill["priority_sol"],
++            "cash_debit": fill["cash_debit"],
++            "venue": "paper",
++            "timestamp": now,
++        }
++
++    async def sell(
++        self,
++        token_mint: str,
++        token_amount,
++        reason: str = "exit",
++        prebuilt_tx: bytes | None = None,
++        price_history: list | None = None,
++    ) -> dict:
++        del prebuilt_tx, price_history
++        now = time.time()
++        amount = self._resolve_tokens(token_mint, token_amount)
++        mid = self._prices.get(token_mint, 0.0)
++        if amount <= 0 or mid <= 0:
++            return {
++                "success": False,
++                "error": "no_price" if mid <= 0 else "zero_amount",
++                "venue": "paper",
++                "type": "sell",
++                "mint": token_mint,
++                "reason": reason,
++                "timestamp": now,
++            }
++        fill = sell_fill(amount, mid)
++        remaining = self._held.get(token_mint, 0) - amount
++        if remaining > 0:
++            self._held[token_mint] = remaining
++        else:
++            self._held.pop(token_mint, None)
++        self.wallet.credit(fill["sol_received"])
++        return {
++            "success": True,
++            "signature": f"PAPER_SELL_{token_mint[:8]}_{int(now)}",
++            "type": "sell",
++            "mint": token_mint,
++            "reason": reason,
++            "sol_received": fill["sol_received"],
++            "fee_sol": fill["fee_sol"],
++            "priority_sol": fill["priority_sol"],
++            "tokens_sold": amount,
++            "venue": "paper",
++            "timestamp": now,
++        }
+diff --git a/paper_only/feedhealth.py b/paper_only/feedhealth.py
+new file mode 100644
+index 0000000..cdbf825
+--- /dev/null
++++ b/paper_only/feedhealth.py
+@@ -0,0 +1,116 @@
++"""Host-freeze and market-data-gap tracker.
++
++Host freeze: the event-loop heartbeat woke up late. A stall of at least
++FREEZE_DETECT_S is recorded, new entries pause for ENTRY_PAUSE_S, and a
++stall of at least FLATTEN_FREEZE_S requests a flatten.
++
++Data gap: silence on the PumpPortal stream of at least WS_GAP_S. Gaps are
++counted separately from freezes. A quiet market can look like a gap; the
++stat is a feed-health record, not proof of a missed edge.
++"""
++
++from __future__ import annotations
++
++import time
++
++HEARTBEAT_INTERVAL_S = 1.0
++FREEZE_DETECT_S = 5.0
++ENTRY_PAUSE_S = 90.0
++FLATTEN_FREEZE_S = 300.0
++WS_GAP_S = 15.0
++
++
++class FeedHealth:
++    def __init__(self) -> None:
++        now = time.monotonic()
++        self._last_beat = now
++        self._last_ws = now
++        self._ws_armed = False
++        self._seq = 0
++        self.entry_pause_until = 0.0
++        self.pending_flatten = False
++        self.freezes: list[dict] = []
++        self.gaps: list[dict] = []
++
++    def observe_stall(self, stall_s: float, *, wall_end: float | None = None) -> dict | None:
++        if stall_s < FREEZE_DETECT_S:
++            return None
++        self._seq += 1
++        end = time.time() if wall_end is None else wall_end
++        rec = {
++            "id": self._seq,
++            "kind": "host_freeze",
++            "stall_s": round(float(stall_s), 3),
++            "wall_start": end - float(stall_s),
++            "wall_end": end,
++            "flatten": float(stall_s) >= FLATTEN_FREEZE_S,
++        }
++        self.freezes.append(rec)
++        self.entry_pause_until = time.monotonic() + ENTRY_PAUSE_S
++        if rec["flatten"]:
++            self.pending_flatten = True
++        return rec
++
++    def heartbeat(self) -> dict | None:
++        now = time.monotonic()
++        elapsed = now - self._last_beat
++        self._last_beat = now
++        return self.observe_stall(elapsed - HEARTBEAT_INTERVAL_S)
++
++    def note_ws_message(self) -> dict | None:
++        now = time.monotonic()
++        if not self._ws_armed:
++            self._ws_armed = True
++            self._last_ws = now
++            return None
++        gap = now - self._last_ws
++        self._last_ws = now
++        if gap < WS_GAP_S:
++            return None
++        self._seq += 1
++        end = time.time()
++        rec = {
++            "id": self._seq,
++            "kind": "data_gap",
++            "gap_s": round(gap, 3),
++            "wall_start": end - gap,
++            "wall_end": end,
++        }
++        self.gaps.append(rec)
++        return rec
++
++    def entries_paused(self) -> bool:
++        return time.monotonic() < self.entry_pause_until
++
++    def consume_flatten(self) -> bool:
++        if not self.pending_flatten:
++            return False
++        self.pending_flatten = False
++        return True
++
++    @staticmethod
++    def _overlaps(events: list[dict], start_wall: float, end_wall: float) -> bool:
++        for ev in events:
++            if ev["wall_start"] <= end_wall and ev["wall_end"] >= start_wall:
++                return True
++        return False
++
++    def bucket(self, start_wall: float, end_wall: float) -> str:
++        """Mutually exclusive label. A freeze hides a gap on the same hold."""
++        if self._overlaps(self.freezes, start_wall, end_wall):
++            return "freeze_hit"
++        if self._overlaps(self.gaps, start_wall, end_wall):
++            return "data_gap"
++        return "clean"
++
++    def snapshot(self) -> dict:
++        return {
++            "freezes": list(self.freezes),
++            "gaps": list(self.gaps),
++            "entries_paused": self.entries_paused(),
++            "pending_flatten": self.pending_flatten,
++            "freeze_detect_s": FREEZE_DETECT_S,
++            "entry_pause_s": ENTRY_PAUSE_S,
++            "flatten_freeze_s": FLATTEN_FREEZE_S,
++            "ws_gap_s": WS_GAP_S,
++        }
+diff --git a/paper_only/frozen.py b/paper_only/frozen.py
+new file mode 100644
+index 0000000..916d54b
+--- /dev/null
++++ b/paper_only/frozen.py
+@@ -0,0 +1,138 @@
++"""Frozen thresholds for the paper comparison.
++
++Values are the config.py defaults at source commit
++9290bc9fb72a49f2955bada2ad3ff4b0d0f1df48, plus the documented comparison
++overrides (fixed 0.1 SOL, no adaptive compounding, auto-tune off).
++
++The README "strategy at a glance" table does not match these defaults.
++This file follows the code, not that table.
++"""
++
++from __future__ import annotations
++
++SOURCE_COMMIT = "9290bc9fb72a49f2955bada2ad3ff4b0d0f1df48"
++SOURCE_REPO = "https://github.com/Jkurre697/solana-pumpfun-bot"
++UPSTREAM_REPO = "https://github.com/DeeKalshiWay/solana-pumpfun-bot"
++
++# Public read-only Solana HTTP RPC. No API key.
++PUBLIC_RPC_PRIMARY = "https://api.mainnet-beta.solana.com"
++PUBLIC_RPC_BACKUP = "https://solana-rpc.publicnode.com"
++
++# Upstream code defaults. Applied even if the shell or a .env disagrees.
++FROZEN_UPSTREAM: dict[str, str] = {
++    "PAPER_STARTING_SOL": "1.0",
++    "PAPER_TIME_EXIT_MIN": "10",
++    "USE_LOCAL_TX_BUILD": "false",
++    "COMPUTE_UNIT_LIMIT": "200000",
++    "COMPUTE_UNIT_PRICE_MICROLAMPORTS": "300000",
++    "MIN_BUY_SCORE": "60",
++    "MIN_BONDING_CURVE_PCT": "30.0",
++    "MAX_BONDING_CURVE_PCT": "80.0",
++    "BUY_COOLDOWN_SECONDS": "15",
++    "MAX_INITIAL_BUY_SOL": "3.5",
++    "CREATOR_TRACKING_ENABLED": "true",
++    "CREATOR_TOP_N": "50",
++    "CREATOR_MIN_LAUNCHES": "2",
++    "MAX_TOTAL_EXPOSURE_SOL": "0.50",
++    "MAX_OPEN_POSITIONS": "3",
++    "ADAPTIVE_LOOKBACK": "20",
++    "ADAPTIVE_HOT_WR": "0.55",
++    "ADAPTIVE_COLD_WR": "0.30",
++    "TAKE_PROFIT_LEVELS": (
++        '[{"gain_pct": 50, "sell_pct": 25}, '
++        '{"gain_pct": 100, "sell_pct": 25}, '
++        '{"gain_pct": 200, "sell_pct": 25}]'
++    ),
++    "TRAILING_STOP_ENABLED": "true",
++    "TRAILING_STOP_MIN_PROFIT": "20.0",
++    "TRAILING_STOP_PCT": "15.0",
++    "TRAILING_STOP_MOONSHOT_PCT": "25.0",
++    "TRAILING_STOP_MOONSHOT_TRIGGER": "100.0",
++    "STOP_LOSS_PCT": "15.0",
++    "EMERGENCY_STOP_DRAWDOWN_PCT": "25.0",
++    "TIME_EXIT_MINUTES": "5",
++    "PANIC_STOP_LOSS_PCT": "25.0",
++    "MAX_SYMBOL_LIFETIME_DEPLOY_PCT": "10.0",
++    "REGIME_FILTER_ENABLED": "true",
++    "REGIME_PAUSE_RATIO": "0.5",
++    "REGIME_MIN_HOURS": "6",
++    "EARLY_RUG_PCT": "5.0",
++    "EARLY_RUG_WINDOW_SEC": "60",
++    "SMART_CALLER_MIN": "20",
++    "FUSION_ENABLED": "true",
++    "FUSION_MAX_BONUS": "15",
++    "FUSION_MAX_PENALTY": "10",
++    "RUG_MATCH_MIN_RUGS": "1",
++    "RUG_MAX_PENALTY": "50",
++    "RUG_HARD_REJECT_MATCHES": "3",
++    "AUTO_TUNE_OFFSET_MIN": "-3",
++    "AUTO_TUNE_OFFSET_MAX": "5",
++    "NO_MOVEMENT_EXIT_SECONDS": "90",
++    "NO_MOVEMENT_BAND_PCT": "3.0",
++    "LOSS_STREAK_LIMIT": "5",
++    "LOSS_STREAK_PAUSE_MIN": "15",
++    "DAILY_LOSS_LIMIT_PCT": "20.0",
++    "DAILY_PROFIT_LOCK_PCT": "9999.0",
++    "MOMENTUM_STALL_ENABLED": "true",
++    "MOMENTUM_STALL_PCT_BAND": "5.0",
++    "MOMENTUM_STALL_WINDOW_SEC": "60",
++    "MOMENTUM_STALL_MIN_PROFIT": "5.0",
++    "EXIT_LATENCY_ENABLED": "true",
++    "EXIT_LATENCY_P50_S": "0.8",
++    "EXIT_LATENCY_P99_S": "3.0",
++    "STAMPEDE_MULT_STALL": "5.0",
++    "SLIPPAGE_BPS": "1500",
++    "BUY_SLIPPAGE_BPS": "1500",
++    "SELL_SLIPPAGE_BPS": "4000",
++    "PRIORITY_FEE_SOL": "0.001",
++    "SELL_PRIORITY_FEE_SOL": "0.005",
++}
++
++# Documented deltas from upstream defaults. Required for this comparison.
++COMPARISON_OVERRIDES: dict[str, str] = {
++    "PAPER_TRADING": "true",
++    "MAX_SOL_PER_TRADE": "0.1",
++    "MAX_POSITION_PCT": "1",
++    "ADAPTIVE_SIZING_ENABLED": "false",
++    "ADAPTIVE_HOT_MULT": "1",
++    "ADAPTIVE_COLD_MULT": "1",
++    "ADAPTIVE_HARD_CAP_MULT": "1",
++    "AUTO_TUNE_ENABLED": "false",
++    "REALISTIC_PAPER_SIM": "0",
++    "USE_LOCAL_TX_BUILD": "false",
++    "RPC_URL": PUBLIC_RPC_PRIMARY,
++    "EXTRA_RPC_URLS": "",
++    "JITO_REGION": "",
++}
++
++# Cleared so this process cannot authenticate a paid API or send a message.
++BLANKED_SECRETS: dict[str, str] = {
++    "SOLANA_PRIVATE_KEY": "",
++    "HELIUS_API_KEY": "",
++    "BIRDEYE_API_KEY": "",
++    "TWITTER_BEARER_TOKEN": "",
++    "X_BEARER_TOKEN": "",
++    "TELEGRAM_API_ID": "0",
++    "TELEGRAM_API_HASH": "",
++    "TELEGRAM_PHONE": "",
++    "TELEGRAM_CHANNELS": "",
++    "TELEGRAM_BOT_TOKEN": "",
++    "TELEGRAM_OWNER_CHAT_ID": "",
++    "TELEGRAM_CHAT_ID": "",
++    "TELEGRAM_RELAY_CHAT_ID": "",
++    "SMTP_HOST": "",
++    "SMTP_USER": "",
++    "SMTP_PASSWORD": "",
++    "REPORT_EMAIL_TO": "",
++    "REPORT_EMAIL_FROM": "",
++    "DASHBOARD_AUTH_USER": "",
++    "DASHBOARD_AUTH_PASS": "",
++    "RELAY_SECRET": "",
++    "SYNTHETIC_INJECT": "",
++    "GRAD_ALERTS": "0",
++}
++
++# config._env_* names the lock must set. The test parses config.py for these.
++LOCKED_ENV_NAMES: frozenset[str] = frozenset(
++    set(FROZEN_UPSTREAM) | set(COMPARISON_OVERRIDES)
++)
+diff --git a/paper_only/lock.py b/paper_only/lock.py
+new file mode 100644
+index 0000000..8bbc796
+--- /dev/null
++++ b/paper_only/lock.py
+@@ -0,0 +1,41 @@
++"""Apply the paper-comparison environment lock.
++
++Call this before importing config.py. python-dotenv is disabled while the
++lock is set, and live signing modules refuse to construct.
++"""
++
++from __future__ import annotations
++
++import os
++
++from paper_only.frozen import BLANKED_SECRETS, COMPARISON_OVERRIDES, FROZEN_UPSTREAM
++
++_KEYED_RPC_MARKERS = (
++    "api-key",
++    "api_key",
++    "helius",
++    "alchemy",
++    "quiknode",
++    "quicknode",
++    "triton.one",
++)
++
++
++def install_lock() -> None:
++    """Force paper mode, frozen thresholds, and empty credentials."""
++    os.environ["PAPER_COMPARE_LOCK"] = "1"
++    for key, value in FROZEN_UPSTREAM.items():
++        os.environ[key] = value
++    for key, value in COMPARISON_OVERRIDES.items():
++        os.environ[key] = value
++    for key, value in BLANKED_SECRETS.items():
++        os.environ[key] = value
++    rpc = os.environ.get("RPC_URL", "")
++    lowered = rpc.lower()
++    for marker in _KEYED_RPC_MARKERS:
++        if marker in lowered:
++            raise RuntimeError(f"PAPER_COMPARE_LOCK refuses keyed RPC URL ({marker})")
++
++
++def paper_compare_locked() -> bool:
++    return os.getenv("PAPER_COMPARE_LOCK") == "1"
+diff --git a/paper_only/net_guard.py b/paper_only/net_guard.py
+new file mode 100644
+index 0000000..4605cf0
+--- /dev/null
++++ b/paper_only/net_guard.py
+@@ -0,0 +1,99 @@
++"""Block transaction submission and signer imports inside this process."""
++
++from __future__ import annotations
++
++import importlib.abc
++import json
++import os
++
++BLOCKED_RPC_METHODS = frozenset({
++    "sendTransaction",
++    "sendRawTransaction",
++    "requestAirdrop",
++    "simulateTransaction",
++})
++
++BLOCKED_URL_SNIPPETS = (
++    "pumpportal.fun/api/trade-local",
++    "block-engine.jito.wtf",
++    "api.telegram.org",
++    "/swap",
++)
++
++BLOCKED_IMPORTS = frozenset({
++    "trader.wallet",
++    "trader.executor",
++    "trader.pumpportal_executor",
++    "trader.local_tx_builder",
++})
++
++
++class PaperSafetyError(RuntimeError):
++    pass
++
++
++def inspect_call(url: str, kwargs: dict | None = None) -> None:
++    """Raise if this HTTP call could submit or sign a transaction."""
++    if os.getenv("PAPER_COMPARE_LOCK") != "1":
++        return
++    url_s = str(url)
++    for snippet in BLOCKED_URL_SNIPPETS:
++        if snippet in url_s:
++            raise PaperSafetyError(f"blocked URL under paper lock: {url_s}")
++    payload = None if kwargs is None else kwargs.get("json")
++    if payload is None and kwargs is not None:
++        raw = kwargs.get("data")
++        if isinstance(raw, (bytes, bytearray)):
++            try:
++                payload = json.loads(raw.decode("utf-8"))
++            except (UnicodeError, json.JSONDecodeError):
++                if b"sendTransaction" in raw or b"sendRawTransaction" in raw:
++                    raise PaperSafetyError("blocked transaction body") from None
++        elif isinstance(raw, str) and (
++            "sendTransaction" in raw or "sendRawTransaction" in raw
++        ):
++            raise PaperSafetyError("blocked transaction body")
++    items = payload if isinstance(payload, list) else [payload]
++    for item in items:
++        if isinstance(item, dict) and item.get("method") in BLOCKED_RPC_METHODS:
++            raise PaperSafetyError(f"blocked RPC method {item.get('method')}")
++
++
++_INSTALLED = False
++_IMPORTS_BLOCKED = False
++
++
++def install_network_guard() -> None:
++    """Wrap aiohttp so locked processes cannot POST a send method."""
++    global _INSTALLED
++    if _INSTALLED:
++        return
++    import aiohttp
++
++    original = aiohttp.ClientSession._request
++
++    async def guarded(self, method, url, **kwargs):
++        inspect_call(str(url), kwargs)
++        return await original(self, method, url, **kwargs)
++
++    aiohttp.ClientSession._request = guarded  # type: ignore[method-assign]
++    _INSTALLED = True
++
++
++class _SignerImportBlocker(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        if fullname in BLOCKED_IMPORTS:
++            raise PaperSafetyError(
++                f"PAPER_COMPARE_LOCK refuses import of {fullname}"
++            )
++        return None
++
++
++def install_import_blocker() -> None:
++    """Refuse later imports of the live signing modules."""
++    global _IMPORTS_BLOCKED
++    if _IMPORTS_BLOCKED:
++        return
++    import sys
++    sys.meta_path.insert(0, _SignerImportBlocker())
++    _IMPORTS_BLOCKED = True
+diff --git a/paper_only/prices.py b/paper_only/prices.py
+new file mode 100644
+index 0000000..6353fe4
+--- /dev/null
++++ b/paper_only/prices.py
+@@ -0,0 +1,116 @@
++"""Read-only price marks.
++
++Copied in structure from main._bonding_curve_price and the DexScreener
++branch of main._get_token_price. Jupiter's quote API is not called.
++
++getAccountInfo is the only RPC method used here. The network guard rejects
++transaction-submission methods. Primary is the public Solana RPC.
++PublicNode is the backup.
++"""
++
++from __future__ import annotations
++
++import base64
++import struct
++
++import aiohttp
++
++from paper_only.frozen import PUBLIC_RPC_BACKUP, PUBLIC_RPC_PRIMARY
++
++_PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
++_ALLOWED_METHODS = frozenset({"getAccountInfo"})
++
++
++def _rpc_urls() -> list[str]:
++    urls = [PUBLIC_RPC_PRIMARY]
++    if PUBLIC_RPC_BACKUP not in urls:
++        urls.append(PUBLIC_RPC_BACKUP)
++    return urls
++
++
++async def _post_get_account_info(
++    session: aiohttp.ClientSession,
++    url: str,
++    params: list,
++) -> dict | None:
++    payload = {
++        "jsonrpc": "2.0",
++        "id": 1,
++        "method": "getAccountInfo",
++        "params": params,
++    }
++    if payload["method"] not in _ALLOWED_METHODS:
++        raise RuntimeError("price reader attempted a non-read RPC method")
++    try:
++        async with session.post(
++            url,
++            json=payload,
++            timeout=aiohttp.ClientTimeout(total=4),
++        ) as resp:
++            if resp.status != 200:
++                return None
++            return await resp.json()
++    except (TimeoutError, aiohttp.ClientError):
++        return None
++
++
++async def bonding_curve_price(session: aiohttp.ClientSession, mint: str) -> float:
++    """SOL per raw token unit from the pump.fun bonding-curve account."""
++    try:
++        from solders.pubkey import Pubkey
++    except ImportError:
++        return 0.0
++    try:
++        program = Pubkey.from_string(_PUMP_PROGRAM_ID)
++        curve, _bump = Pubkey.find_program_address(
++            [b"bonding-curve", bytes(Pubkey.from_string(mint))],
++            program,
++        )
++    except Exception:
++        return 0.0
++    params = [str(curve), {"encoding": "base64", "commitment": "confirmed"}]
++    for url in _rpc_urls():
++        data = await _post_get_account_info(session, url, params)
++        if not data:
++            continue
++        value = (data.get("result") or {}).get("value")
++        if not value:
++            continue
++        try:
++            raw = base64.b64decode(value["data"][0])
++            v_tok, v_sol = struct.unpack_from("<QQ", raw, 8)
++        except (KeyError, TypeError, ValueError, struct.error):
++            continue
++        if v_tok == 0:
++            continue
++        return (v_sol / 1e9) / v_tok
++    return 0.0
++
++
++async def dexscreener_price(session: aiohttp.ClientSession, mint: str) -> float:
++    """SOL per raw unit from DexScreener priceNative, 6-decimal pump tokens."""
++    url = f"https://api.dexscreener.com/latest/dex/tokens/{mint}"
++    try:
++        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
++            if resp.status != 200:
++                return 0.0
++            data = await resp.json()
++    except (TimeoutError, aiohttp.ClientError):
++        return 0.0
++    pairs = data.get("pairs") or []
++    if not pairs:
++        return 0.0
++    try:
++        price_native = float(pairs[0].get("priceNative") or 0)
++    except (TypeError, ValueError):
++        return 0.0
++    if price_native <= 0:
++        return 0.0
++    return price_native / 1_000_000
++
++
++async def read_price(session: aiohttp.ClientSession, mint: str) -> float:
++    price = await bonding_curve_price(session, mint)
++    if price > 0:
++        return price
++    return await dexscreener_price(session, mint)
+diff --git a/paper_only/runner.py b/paper_only/runner.py
+new file mode 100644
+index 0000000..cc72ebb
+--- /dev/null
++++ b/paper_only/runner.py
+@@ -0,0 +1,325 @@
++"""Run upstream scoring and risk code under the paper lock.
++
++What this is
++------------
++SignalScorer and RiskManager from this repository, at the pinned commit,
++with the public PumpPortal new-token stream and the public read-only price
++readers. Exits are the upstream risk manager's. Fills are ComparisonPaperExecutor.
++
++What this is not
++----------------
++It is not `python main.py`. main.py can construct a live signer when
++PAPER_TRADING is false, and it starts a dashboard that can force-sell.
++It is not tools/graduation_sniper.py, which is a different paper strategy
++with a 0.25 SOL size. It is not a reimplementation of the scorer. It is
++not evidence of profit.
++
++State is written under the dedicated state directory after chdir, in
++relative logs/. That directory must not be the baseline bot folder.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import json
++import os
++import signal
++import sys
++from pathlib import Path
++
++from paper_only.book import CompareBook
++from paper_only.feedhealth import FeedHealth
++from paper_only.frozen import (
++    PUBLIC_RPC_BACKUP,
++    PUBLIC_RPC_PRIMARY,
++    SOURCE_COMMIT,
++    SOURCE_REPO,
++    UPSTREAM_REPO,
++)
++from paper_only.net_guard import install_import_blocker, install_network_guard
++from paper_only.sizing import fixed_entry_size
++
++_BASELINE_NAME = "pumpfun-sniper"
++
++
++def assert_safe_state_dir(path: Path, repo: Path) -> Path:
++    resolved = path.expanduser().resolve()
++    repo_resolved = repo.resolve()
++    if resolved == repo_resolved:
++        raise RuntimeError("paper state directory must not be the repository root")
++    for part in resolved.parts:
++        if part.lower() == _BASELINE_NAME:
++            raise RuntimeError(
++                "refusing to use a pumpfun-sniper path. "
++                "The baseline bot stays untouched."
++            )
++    if (resolved / ".env").exists():
++        raise RuntimeError("refusing a state directory that contains .env")
++    return resolved
++
++
++def _write_pin(repo: Path) -> None:
++    pin = {
++        "source_commit": SOURCE_COMMIT,
++        "source_repo": SOURCE_REPO,
++        "upstream_repo": UPSTREAM_REPO,
++        "license": "MIT; see LICENSE at the repository root. Copyright (c) 2026.",
++        "mode": "upstream decision modules, isolated",
++        "not": [
++            "unmodified python main.py",
++            "tools/graduation_sniper.py",
++            "a port that reimplements the scorer",
++            "a profitability result",
++        ],
++        "entry_sol": 0.1,
++        "compounding": False,
++        "costs": {
++            "fee_rate_per_side": 0.01,
++            "adverse_slippage_per_side": 0.02,
++            "priority_sol_per_tx": 0.0005,
++            "fee_accounting": "fee and priority are extra cash debits on entry, not taken out of the 0.1",
++        },
++        "feeds": {
++            "launches": "wss://pumpportal.fun/api/data subscribeNewToken (public, no key)",
++            "prices": [
++                "getAccountInfo on the pump.fun bonding-curve PDA",
++                "https://api.dexscreener.com (fallback)",
++            ],
++            "rpc_primary": PUBLIC_RPC_PRIMARY,
++            "rpc_backup": PUBLIC_RPC_BACKUP,
++            "not_used": [
++                "Helius",
++                "Birdeye",
++                "Jupiter swap or quote",
++                "Twitter/X",
++                "Telegram",
++                "logsSubscribe (that is the baseline feed, not this one)",
++            ],
++        },
++        "fidelity_gaps": [
++            "README strategy table disagrees with config.py defaults; frozen values are the code defaults.",
++            "Auto-tune is forced off. Adaptive size is forced off. Max position percent is 1 so the 0.1 entry is not clipped to 5% of the 1 SOL book.",
++            "Max open positions stays at the upstream default of 3, not the baseline's 4.",
++            "Symbol lifetime cap stays 10% of the 1.0 SOL starting book, so a second 0.1 entry in the same symbol is refused.",
++            "Upstream realistic paper sim (MEV tax, 5% fail rate, size slippage, 0.001/0.005 priority caps) is not used.",
++            "Exit-latency and stampede sampling from trader.paper_executor are not used.",
++            "Jupiter quotes are not used after migration. DexScreener is the fallback.",
++            "Holder-concentration reads use the public RPC and fail open on errors, which is upstream behavior.",
++            "Twitter, Telegram, email, the web dashboard, and the graduation sniper are not started.",
++            "Buy cooldown remains 15 seconds, from upstream config.",
++        ],
++    }
++    try:
++        import subprocess
++        rev = subprocess.run(
++            ["git", "-C", str(repo), "rev-parse", "HEAD"],
++            capture_output=True,
++            text=True,
++            timeout=5,
++            check=False,
++        )
++        if rev.returncode == 0:
++            pin["git_head"] = rev.stdout.strip()
++    except (OSError, subprocess.SubprocessError):
++        pin["git_head"] = None
++    os.makedirs("logs", exist_ok=True)
++    with open("logs/PAPER_COMPARE_PIN.json", "w", encoding="utf-8") as handle:
++        json.dump(pin, handle, indent=2)
++    with open("PAPER_COMPARE_PIN.json", "w", encoding="utf-8") as handle:
++        json.dump(pin, handle, indent=2)
++
++
++def _acquire_pid() -> None:
++    os.makedirs("logs", exist_ok=True)
++    path = "logs/paper_compare.pid"
++    if os.path.exists(path):
++        try:
++            old = int(Path(path).read_text(encoding="utf-8").strip())
++        except ValueError:
++            old = None
++        if old and old != os.getpid():
++            try:
++                os.kill(old, 0)
++            except OSError:
++                old = None
++            else:
++                raise SystemExit(f"paper comparison already running (pid {old})")
++    Path(path).write_text(str(os.getpid()), encoding="utf-8")
++
++
++async def _trade_loop(trade_queue, executor, risk, health: FeedHealth, book: CompareBook) -> None:
++    from config import CREATOR_BLACKLIST
++
++    while True:
++        try:
++            token = await asyncio.wait_for(trade_queue.get(), timeout=1.0)
++        except TimeoutError:
++            continue
++        if risk.emergency_stop_active:
++            continue
++        if health.entries_paused():
++            continue
++        mint = token.get("mint", "")
++        symbol = token.get("symbol", "???")
++        creator = token.get("creator", "")
++        if creator and creator in CREATOR_BLACKLIST:
++            continue
++        score = int(token.get("score") or 0)
++        sol_amount, _reason = await fixed_entry_size(risk, score, symbol)
++        if sol_amount <= 0:
++            continue
++        result = await executor.buy(mint, sol_amount, token=token)
++        if result.get("success") and result.get("tokens_expected", 0) > 0:
++            risk.open_position(token, result)
++            book.on_open(mint, result)
++
++
++async def _heartbeat(health: FeedHealth, risk, book: CompareBook) -> None:
++    while True:
++        await asyncio.sleep(1.0)
++        health.heartbeat()
++        if health.consume_flatten():
++            for mint in list(risk.positions):
++                await risk._force_sell(mint, "freeze_flatten")
++        book.write_health()
++
++
++async def _prices(risk, executor) -> None:
++    import aiohttp
++
++    from paper_only.prices import read_price
++
++    async with aiohttp.ClientSession() as session:
++        while True:
++            mints = list(risk.positions.keys())
++            if mints:
++                marks = await asyncio.gather(
++                    *[read_price(session, mint) for mint in mints],
++                    return_exceptions=True,
++                )
++                for mint, mark in zip(mints, marks, strict=True):
++                    if isinstance(mark, (int, float)) and mark > 0:
++                        risk.update_price(mint, mark)
++                        executor.update_price(mint, mark)
++            await asyncio.sleep(1.5)
++
++
++def _make_risk_class(risk_manager_cls, book: CompareBook):
++    class CompareRisk(risk_manager_cls):
++        def close_position(self, mint: str, sell_result: dict):
++            before = len(self.closed_trades)
++            super().close_position(mint, sell_result)
++            if len(self.closed_trades) > before:
++                book.tag_record(self.closed_trades[-1])
++
++        def _record_partial_close(self, mint, pos, sell_fraction, sell_result, level_id):
++            before = len(self.closed_trades)
++            super()._record_partial_close(mint, pos, sell_fraction, sell_result, level_id)
++            if len(self.closed_trades) > before:
++                book.tag_record(self.closed_trades[-1])
++
++    return CompareRisk
++
++
++async def launch(state_dir: Path) -> None:
++    repo = Path(__file__).resolve().parents[1]
++    state = assert_safe_state_dir(state_dir, repo)
++    state.mkdir(parents=True, exist_ok=True)
++    os.chdir(state)
++    if str(repo) not in sys.path:
++        sys.path.insert(0, str(repo))
++
++    install_network_guard()
++    install_import_blocker()
++    _write_pin(repo)
++    _acquire_pid()
++
++    from loguru import logger
++
++    from analyzer.regime_filter import regime_filter
++    from analyzer.signal_scorer import SignalScorer
++    from config import (
++        MAX_OPEN_POSITIONS,
++        MAX_SOL_PER_TRADE,
++        MIN_BUY_SCORE,
++        PAPER_STARTING_SOL,
++        PAPER_TRADING,
++    )
++    from detector.pumpfun_monitor import PumpFunMonitor
++    from detector.pumpfun_tracker import PumpFunTracker
++    from detector.wallet_intel import wallet_intel
++    from detector.whale_tracker import whale_tracker
++    from logger.dashboard import setup_logging
++    from paper_only.executor import ComparisonPaperExecutor
++    from risk.manager import RiskManager
++    from trader.paper_wallet import PaperWallet
++
++    if not PAPER_TRADING:
++        raise RuntimeError("paper lock failed: PAPER_TRADING is false")
++    if abs(MAX_SOL_PER_TRADE - 0.1) > 1e-9:
++        raise RuntimeError(f"paper lock failed: MAX_SOL_PER_TRADE={MAX_SOL_PER_TRADE}")
++
++    setup_logging()
++    logger.warning(
++        "PAPER COMPARE starting. Upstream SignalScorer + RiskManager, "
++        f"fixed 0.1 SOL, commit pin {SOURCE_COMMIT}. Not a profit claim. "
++        f"min_score={MIN_BUY_SCORE} max_positions={MAX_OPEN_POSITIONS} "
++        f"starting_book={PAPER_STARTING_SOL}."
++    )
++
++    health = FeedHealth()
++    book = CompareBook(health)
++    book.write_summary()
++
++    class _ObservedMonitor(PumpFunMonitor):
++        async def _handle_message(self, raw):
++            health.note_ws_message()
++            await super()._handle_message(raw)
++
++    raw_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
++    trade_queue: asyncio.Queue = asyncio.Queue(maxsize=50)
++    wallet = PaperWallet(PAPER_STARTING_SOL)
++    executor = ComparisonPaperExecutor(wallet)
++    compare_cls = _make_risk_class(RiskManager, book)
++    risk = compare_cls(wallet, executor)
++    await risk.initialize()
++    scorer = SignalScorer(raw_queue, trade_queue, executor=executor)
++    monitor = _ObservedMonitor(raw_queue)
++    tracker = PumpFunTracker(monitor=monitor)
++    wallet_intel.attach(monitor)
++    whale_tracker.attach(monitor)
++    regime_filter.attach(monitor)
++
++    shutdown = asyncio.Event()
++
++    def _stop() -> None:
++        shutdown.set()
++
++    loop = asyncio.get_running_loop()
++    for sig in (signal.SIGINT, signal.SIGTERM):
++        try:
++            loop.add_signal_handler(sig, _stop)
++        except NotImplementedError:
++            pass
++
++    tasks = [
++        asyncio.create_task(monitor.run(), name="pumpfun"),
++        asyncio.create_task(tracker.run(), name="pumpfun_tracker"),
++        asyncio.create_task(wallet_intel.run(), name="wallet_intel"),
++        asyncio.create_task(scorer.start(), name="scorer"),
++        asyncio.create_task(_trade_loop(trade_queue, executor, risk, health, book), name="trade"),
++        asyncio.create_task(risk.run_monitor_loop(), name="risk"),
++        asyncio.create_task(_prices(risk, executor), name="prices"),
++        asyncio.create_task(_heartbeat(health, risk, book), name="heartbeat"),
++    ]
++    await shutdown.wait()
++    monitor.stop()
++    tracker.stop()
++    wallet_intel.stop()
++    risk.stop()
++    for task in tasks:
++        task.cancel()
++    await asyncio.gather(*tasks, return_exceptions=True)
++    book.write_health()
++    book.write_summary()
++    logger.warning("PAPER COMPARE stopped. Buckets are in logs/compare_buckets.json.")
+diff --git a/paper_only/selfcheck.py b/paper_only/selfcheck.py
+new file mode 100644
+index 0000000..d42368e
+--- /dev/null
++++ b/paper_only/selfcheck.py
+@@ -0,0 +1,50 @@
++"""Offline checks. No network, no wallet material, no transaction."""
++
++from __future__ import annotations
++
++
++def run_self_check() -> int:
++    import config
++    from paper_only.costs import FIXED_ENTRY_SOL, buy_fill
++    from paper_only.frozen import PUBLIC_RPC_PRIMARY
++
++    assert config.PAPER_TRADING is True
++    assert config.PRIVATE_KEY == ""
++    assert abs(config.MAX_SOL_PER_TRADE - FIXED_ENTRY_SOL) < 1e-12
++    assert config.ADAPTIVE_SIZING_ENABLED is False
++    assert config.AUTO_TUNE_ENABLED is False
++    assert config.MIN_BUY_SCORE == 60
++    assert config.MAX_OPEN_POSITIONS == 3
++    assert config.RPC_URL == PUBLIC_RPC_PRIMARY
++    assert config.HELIUS_API_KEY == ""
++    assert config.TWITTER_BEARER_TOKEN == ""
++    assert buy_fill(1e-8)["tokens"] > 0
++
++    from trader.wallet import SolanaWallet
++
++    try:
++        SolanaWallet()
++    except RuntimeError as exc:
++        if "PAPER_COMPARE_LOCK" not in str(exc):
++            raise
++    else:
++        raise RuntimeError("SolanaWallet constructed under the paper lock")
++
++    from trader.local_tx_builder import build_buy_tx_bytes
++
++    try:
++        build_buy_tx_bytes(  # type: ignore[arg-type]
++            user=None, mint=None, sol_amount_lamports=1, v_sol_reserves=1,
++            v_token_reserves=1, slippage_bps=1, cu_limit=1,
++            cu_price_micro_lamports=1, recent_blockhash=None,
++        )
++    except RuntimeError as exc:
++        if "PAPER_COMPARE_LOCK" not in str(exc):
++            raise
++    else:
++        raise RuntimeError("build_buy_tx_bytes ran under the paper lock")
++
++    print("paper-only self-check ok")
++    print("mode: upstream decision modules, isolated")
++    print("no wallet loaded, no transaction built, no network called")
++    return 0
+diff --git a/paper_only/sizing.py b/paper_only/sizing.py
+new file mode 100644
+index 0000000..4e2d013
+--- /dev/null
++++ b/paper_only/sizing.py
+@@ -0,0 +1,19 @@
++"""Fixed 0.1 SOL entries. No compounding and no clipped size."""
++
++from __future__ import annotations
++
++from paper_only.costs import FIXED_ENTRY_SOL
++
++
++async def fixed_entry_size(risk_manager, score: int, symbol: str | None) -> tuple[float, str]:
++    """Honor upstream risk gates, then require the size to be exactly 0.1.
++
++    If the sizer clips, scales, or otherwise returns any other positive size,
++    the trade is skipped. A smaller 'almost 0.1' entry is not taken.
++    """
++    size, reason = await risk_manager.calculate_position_size(score, symbol=symbol)
++    if reason:
++        return 0.0, reason
++    if abs(float(size) - FIXED_ENTRY_SOL) > 1e-9:
++        return 0.0, "fixed_size_unavailable"
++    return FIXED_ENTRY_SOL, ""
+diff --git a/tests/test_paper_executor.py b/tests/test_paper_executor.py
+index 626bf6e..0d117b2 100644
+--- a/tests/test_paper_executor.py
++++ b/tests/test_paper_executor.py
+@@ -40,7 +40,20 @@ class _FakeWallet:
+ 
+ 
+ def _run(coro):
+-    return asyncio.get_event_loop().run_until_complete(coro)
++    """Run a coroutine from a sync test.
++
++    pytest-asyncio 1.x closes the main-thread loop after async tests.
++    asyncio.get_event_loop() then raises on Python 3.12, so open a fresh
++    loop when the current one is missing or already closed.
++    """
++    try:
++        loop = asyncio.get_event_loop()
++        if loop.is_closed():
++            raise RuntimeError
++    except RuntimeError:
++        loop = asyncio.new_event_loop()
++        asyncio.set_event_loop(loop)
++    return loop.run_until_complete(coro)
+ 
+ 
+ def _token(mint: str = "MINT_TEST", v_sol: float = 30.0, v_tokens: float = 1_000_000.0):
+diff --git a/tests/test_paper_only_safety.py b/tests/test_paper_only_safety.py
+new file mode 100644
+index 0000000..446daca
+--- /dev/null
++++ b/tests/test_paper_only_safety.py
+@@ -0,0 +1,353 @@
++"""Offline tests for the paper-only comparison harness.
++
++These tests do not open market feeds, do not load a key, and do not send
++a transaction. The subprocess cases start a fresh interpreter so config.py
++is imported only after PAPER_COMPARE_LOCK is set.
++"""
++
++from __future__ import annotations
++
++import ast
++import asyncio
++import os
++import re
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++
++ROOT = Path(__file__).resolve().parents[1]
++PAPER = ROOT / "paper_only"
++
++from paper_only.book import CompareBook
++from paper_only.costs import (
++    ADVERSE_SLIPPAGE,
++    FEE_RATE,
++    FIXED_ENTRY_SOL,
++    PRIORITY_FEE_SOL,
++    buy_fill,
++    sell_fill,
++)
++from paper_only.executor import ComparisonPaperExecutor
++from paper_only.feedhealth import FLATTEN_FREEZE_S, FeedHealth
++from paper_only.frozen import LOCKED_ENV_NAMES
++from paper_only.net_guard import PaperSafetyError, inspect_call, install_network_guard
++from paper_only.runner import assert_safe_state_dir
++from paper_only.sizing import fixed_entry_size
++
++
++def _run(coro):
++    """Run a coroutine without leaving the process event loop closed.
++
++    Other tests in this repo call asyncio.get_event_loop(). asyncio.run()
++    clears that loop on 3.12 and those tests then fail.
++    """
++    loop = asyncio.new_event_loop()
++    try:
++        return loop.run_until_complete(coro)
++    finally:
++        loop.close()
++        asyncio.set_event_loop(asyncio.new_event_loop())
++
++
++def test_frozen_env_covers_every_config_knob():
++    text = (ROOT / "config.py").read_text(encoding="utf-8")
++    names = set(re.findall(
++        r'_env_(?:bool|int|float|json)\s*\(\s*"([A-Z0-9_]+)"',
++        text,
++    ))
++    missing = names - set(LOCKED_ENV_NAMES)
++    assert not missing, f"config knobs not locked: {sorted(missing)}"
++
++
++def test_buy_and_sell_use_comparison_costs():
++    mid = 1e-8
++    bought = buy_fill(mid)
++    assert bought["notional_sol"] == FIXED_ENTRY_SOL
++    assert bought["tokens"] == int(FIXED_ENTRY_SOL / (mid * (1 + ADVERSE_SLIPPAGE)))
++    assert bought["fee_sol"] == pytest.approx(FIXED_ENTRY_SOL * FEE_RATE)
++    assert bought["priority_sol"] == PRIORITY_FEE_SOL
++    assert bought["cash_debit"] == pytest.approx(
++        FIXED_ENTRY_SOL + bought["fee_sol"] + PRIORITY_FEE_SOL
++    )
++    sold = sell_fill(bought["tokens"], mid)
++    gross = bought["tokens"] * mid * (1 - ADVERSE_SLIPPAGE)
++    assert sold["sol_received"] == pytest.approx(gross * (1 - FEE_RATE) - PRIORITY_FEE_SOL)
++    assert sold["sol_received"] < FIXED_ENTRY_SOL
++
++
++class _Wallet:
++    def __init__(self) -> None:
++        self.balance = 1.0
++
++    async def get_sol_balance(self) -> float:
++        return self.balance
++
++    def deduct(self, amount: float) -> None:
++        self.balance -= amount
++
++    def credit(self, amount: float) -> None:
++        self.balance += amount
++
++
++def test_executor_never_signs_and_debits_full_cost():
++    wallet = _Wallet()
++    exe = ComparisonPaperExecutor(wallet)
++    token = {
++        "v_sol_in_bonding": 30.0,
++        "v_tokens_in_bonding": 1_000_000_000.0,
++    }
++    result = _run(exe.buy("MintPaperOnly111", 0.1, token=token))
++    assert result["success"] is True
++    assert result["venue"] == "paper"
++    assert result["signature"].startswith("PAPER_")
++    assert "keypair" not in result
++    assert wallet.balance == pytest.approx(1.0 - result["cash_debit"])
++    sold = _run(exe.sell("MintPaperOnly111", "100%", reason="stop_loss"))
++    assert sold["success"] is True
++    assert sold["signature"].startswith("PAPER_SELL_")
++    assert sold["venue"] == "paper"
++    assert wallet.balance == pytest.approx(1.0 - result["cash_debit"] + sold["sol_received"])
++
++
++def test_executor_rejects_non_fixed_size():
++    exe = ComparisonPaperExecutor(_Wallet())
++    result = _run(exe.buy("MintPaperOnly111", 0.25, token={
++        "v_sol_in_bonding": 30.0,
++        "v_tokens_in_bonding": 1_000_000_000.0,
++    }))
++    assert result["success"] is False
++    assert result["error"] == "non_fixed_size"
++
++
++def test_fixed_size_gate_rejects_clipped_upstream_size():
++    class _Risk:
++        async def calculate_position_size(self, score, symbol=None):
++            return 0.05, ""
++
++    size, reason = _run(fixed_entry_size(_Risk(), 80, "AAA"))
++    assert size == 0.0
++    assert reason == "fixed_size_unavailable"
++
++
++def test_fixed_size_gate_passes_exact_tenth():
++    class _Risk:
++        async def calculate_position_size(self, score, symbol=None):
++            return 0.1, ""
++
++    size, reason = _run(fixed_entry_size(_Risk(), 80, "AAA"))
++    assert size == 0.1
++    assert reason == ""
++
++
++def test_freeze_pause_and_flatten_are_separate_from_clean_bucket(tmp_path, monkeypatch):
++    monkeypatch.chdir(tmp_path)
++    health = FeedHealth()
++    assert health.observe_stall(4.9) is None
++    small = health.observe_stall(6.0, wall_end=1_000.0)
++    assert small is not None
++    assert small["flatten"] is False
++    assert health.entries_paused() is True
++    assert health.consume_flatten() is False
++    big = health.observe_stall(FLATTEN_FREEZE_S, wall_end=2_000.0)
++    assert big["flatten"] is True
++    assert health.consume_flatten() is True
++    assert health.bucket(1_900.0, 2_000.0) == "freeze_hit"
++    assert health.bucket(10.0, 20.0) == "clean"
++    health.note_ws_message()
++    health._last_ws -= 20
++    gap = health.note_ws_message()
++    assert gap is not None and gap["kind"] == "data_gap"
++    book = CompareBook(health)
++    book.on_open("M", {"sol_spent": 0.1, "fee_sol": 0.001, "priority_sol": 0.0005})
++    tagged = book.tag_record({
++        "mint": "M",
++        "symbol": "M",
++        "reason": "stop_loss",
++        "entry_time": 1_950.0,
++        "exit_time": 2_000.0,
++        "sol_invested": 0.1,
++        "sol_received": 0.08,
++        "pnl_sol": -0.02,
++        "partial": False,
++        "score": 70,
++    })
++    assert tagged["bucket"] == "freeze_hit"
++    assert tagged["cash_pnl_sol"] == pytest.approx(-0.02 - 0.0015)
++    summary = (tmp_path / "logs" / "compare_buckets.json").read_text(encoding="utf-8")
++    assert "freeze_hit" in summary
++    assert "clean" in summary
++
++
++def test_network_guard_blocks_send_and_allows_account_read():
++    os.environ["PAPER_COMPARE_LOCK"] = "1"
++    try:
++        inspect_call("https://api.mainnet-beta.solana.com", {
++            "json": {"jsonrpc": "2.0", "id": 1, "method": "getAccountInfo", "params": []},
++        })
++        with pytest.raises(PaperSafetyError):
++            inspect_call("https://api.mainnet-beta.solana.com", {
++                "json": {"jsonrpc": "2.0", "id": 1, "method": "sendTransaction", "params": []},
++            })
++        with pytest.raises(PaperSafetyError):
++            inspect_call("https://pumpportal.fun/api/trade-local", {"json": {}})
++        with pytest.raises(PaperSafetyError):
++            inspect_call("https://ny.mainnet.block-engine.jito.wtf/api/v1/transactions", {"json": {}})
++        install_network_guard()
++        import aiohttp
++
++        async def _attempt():
++            session = aiohttp.ClientSession()
++            try:
++                await session._request(
++                    "POST",
++                    "https://api.mainnet-beta.solana.com",
++                    json={"jsonrpc": "2.0", "method": "sendRawTransaction", "params": []},
++                )
++            finally:
++                await session.close()
++
++        with pytest.raises(PaperSafetyError):
++            _run(_attempt())
++    finally:
++        os.environ.pop("PAPER_COMPARE_LOCK", None)
++
++
++def test_state_dir_refuses_baseline_and_repo_root(tmp_path):
++    with pytest.raises(RuntimeError):
++        assert_safe_state_dir(ROOT, ROOT)
++    baseline = tmp_path / "pumpfun-sniper"
++    baseline.mkdir()
++    with pytest.raises(RuntimeError):
++        assert_safe_state_dir(baseline, ROOT)
++    nested = tmp_path / "pumpfun-sniper" / "state"
++    with pytest.raises(RuntimeError):
++        assert_safe_state_dir(nested, ROOT)
++    ok = tmp_path / "paper_compare_state"
++    assert assert_safe_state_dir(ok, ROOT) == ok.resolve()
++
++
++def test_harness_sources_do_not_import_signers():
++    banned = {
++        "trader.wallet",
++        "trader.executor",
++        "trader.pumpportal_executor",
++        "trader.local_tx_builder",
++        "solders.keypair",
++    }
++    # selfcheck imports the signer modules only to assert they raise.
++    runtime = {
++        "runner.py",
++        "executor.py",
++        "prices.py",
++        "book.py",
++        "sizing.py",
++        "costs.py",
++        "feedhealth.py",
++        "__main__.py",
++        "lock.py",
++        "frozen.py",
++        "net_guard.py",
++    }
++    for path in PAPER.glob("*.py"):
++        if path.name not in runtime:
++            continue
++        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
++        for node in ast.walk(tree):
++            if isinstance(node, ast.ImportFrom) and node.module in banned:
++                raise AssertionError(f"{path.name} imports {node.module}")
++            if isinstance(node, ast.Import):
++                for alias in node.names:
++                    if alias.name in banned:
++                        raise AssertionError(f"{path.name} imports {alias.name}")
++        if path.name != "net_guard.py":
++            text = path.read_text(encoding="utf-8")
++            assert "sendTransaction" not in text
++            assert "sendRawTransaction" not in text
++
++
++def test_self_check_ignores_hostile_dotenv(tmp_path):
++    (tmp_path / ".env").write_text(
++        "\n".join([
++            "PAPER_TRADING=false",
++            "SOLANA_PRIVATE_KEY=this-is-not-a-wallet",
++            "MAX_SOL_PER_TRADE=9",
++            "MIN_BUY_SCORE=1",
++            "AUTO_TUNE_ENABLED=true",
++            "ADAPTIVE_SIZING_ENABLED=true",
++            "RPC_URL=https://mainnet.helius-rpc.com/?api-key=secret",
++            "HELIUS_API_KEY=secret",
++            "TWITTER_BEARER_TOKEN=secret",
++            "TELEGRAM_BOT_TOKEN=secret",
++        ]),
++        encoding="utf-8",
++    )
++    env = os.environ.copy()
++    env.update({
++        "PYTHONPATH": str(ROOT),
++        "PAPER_TRADING": "false",
++        "SOLANA_PRIVATE_KEY": "this-is-not-a-wallet",
++        "MAX_SOL_PER_TRADE": "9",
++        "MIN_BUY_SCORE": "1",
++        "RPC_URL": "https://mainnet.helius-rpc.com/?api-key=secret",
++    })
++    env.pop("PAPER_COMPARE_LOCK", None)
++    proc = subprocess.run(
++        [sys.executable, "-m", "paper_only", "--self-check"],
++        cwd=tmp_path,
++        env=env,
++        capture_output=True,
++        text=True,
++        timeout=60,
++        check=False,
++    )
++    assert proc.returncode == 0, proc.stdout + proc.stderr
++    assert "paper-only self-check ok" in proc.stdout
++    assert "this-is-not-a-wallet" not in proc.stdout
++
++
++def test_main_refuses_to_run_under_the_lock():
++    env = os.environ.copy()
++    env["PYTHONPATH"] = str(ROOT)
++    env["PAPER_COMPARE_LOCK"] = "1"
++    env["PAPER_TRADING"] = "true"
++    env["SOLANA_PRIVATE_KEY"] = ""
++    proc = subprocess.run(
++        [sys.executable, "-c", "import asyncio\nfrom main import main\nasyncio.run(main())\n"],
++        cwd=ROOT,
++        env=env,
++        capture_output=True,
++        text=True,
++        timeout=60,
++        check=False,
++    )
++    assert proc.returncode == 3, proc.stdout + proc.stderr
++
++
++def test_import_blocker_refuses_signer_modules():
++    code = (
++        "import os\n"
++        "os.environ['PAPER_COMPARE_LOCK']='1'\n"
++        "from paper_only.net_guard import install_import_blocker, PaperSafetyError\n"
++        "install_import_blocker()\n"
++        "try:\n"
++        "    import trader.executor\n"
++        "except PaperSafetyError as exc:\n"
++        "    assert 'trader.executor' in str(exc)\n"
++        "else:\n"
++        "    raise SystemExit('signer module imported')\n"
++    )
++    env = os.environ.copy()
++    env["PYTHONPATH"] = str(ROOT)
++    env.pop("PAPER_COMPARE_LOCK", None)
++    proc = subprocess.run(
++        [sys.executable, "-c", code],
++        cwd=ROOT,
++        env=env,
++        capture_output=True,
++        text=True,
++        timeout=60,
++        check=False,
++    )
++    assert proc.returncode == 0, proc.stdout + proc.stderr
+diff --git a/trader/executor.py b/trader/executor.py
+index 2097a55..cd6c14c 100644
+--- a/trader/executor.py
++++ b/trader/executor.py
+@@ -5,6 +5,7 @@ Smart router: Jupiter for Raydium/graduated tokens, PumpPortal for bonding-curve
+ 
+ import asyncio
+ import base64
++import os
+ import time
+ 
+ import aiohttp
+@@ -18,8 +19,17 @@ from trader.pumpportal_executor import PumpPortalExecutor
+ MAX_PRICE_IMPACT_PCT = 40.0
+ 
+ 
++def _refuse_paper_compare(action: str) -> None:
++    if os.getenv("PAPER_COMPARE_LOCK") == "1":
++        raise RuntimeError(
++            f"PAPER_COMPARE_LOCK=1 refuses {action}. "
++            "The paper comparison must not sign or send transactions."
++        )
++
++
+ class TradeExecutor:
+     def __init__(self, keypair: Keypair):
++        _refuse_paper_compare("TradeExecutor()")
+         self.keypair = keypair
+         self.pubkey  = keypair.pubkey()
+         self.session = None
+@@ -83,6 +93,7 @@ class TradeExecutor:
+             return None
+ 
+     async def _sign_and_send(self, tx_base64: str) -> str | None:
++        _refuse_paper_compare("TradeExecutor._sign_and_send")
+         try:
+             tx_bytes = base64.b64decode(tx_base64)
+             raw_tx = VersionedTransaction.from_bytes(tx_bytes)
+diff --git a/trader/local_tx_builder.py b/trader/local_tx_builder.py
+index 0d7f599..3e14208 100644
+--- a/trader/local_tx_builder.py
++++ b/trader/local_tx_builder.py
+@@ -46,6 +46,7 @@ WHAT'S A BEST GUESS
+ from __future__ import annotations
+ 
+ import hashlib
++import os
+ import struct
+ from dataclasses import dataclass
+ 
+@@ -370,6 +371,14 @@ def _assemble_tx_bytes(
+     return bytes(tx)
+ 
+ 
++def _refuse_paper_compare(action: str) -> None:
++    if os.getenv("PAPER_COMPARE_LOCK") == "1":
++        raise RuntimeError(
++            f"PAPER_COMPARE_LOCK=1 refuses {action}. "
++            "The paper comparison must not build signable transactions."
++        )
++
++
+ def build_buy_tx_bytes(
+     *,
+     user:                    Pubkey,
+@@ -386,6 +395,7 @@ def build_buy_tx_bytes(
+     can either read them fresh from the PDA or use a cached snapshot.
+ 
+     Returns serialized unsigned v0 tx bytes."""
++    _refuse_paper_compare("build_buy_tx_bytes")
+     expected = expected_tokens_for_sol(v_sol_reserves, v_token_reserves, sol_amount_lamports)
+     if expected <= 0:
+         raise ValueError(
+@@ -424,6 +434,7 @@ def build_sell_tx_bytes(
+     recent_blockhash:        Hash,
+ ) -> bytes:
+     """End-to-end sell tx assembly. Returns serialized unsigned v0 tx bytes."""
++    _refuse_paper_compare("build_sell_tx_bytes")
+     if token_amount <= 0:
+         raise ValueError(f"sell with non-positive token_amount: {token_amount}")
+     expected_sol  = expected_sol_for_tokens(v_sol_reserves, v_token_reserves, token_amount)
+diff --git a/trader/pumpportal_executor.py b/trader/pumpportal_executor.py
+index 64c37e1..b6e6e93 100644
+--- a/trader/pumpportal_executor.py
++++ b/trader/pumpportal_executor.py
+@@ -7,6 +7,7 @@ Free aside from Solana network fees + pump.fun's 1% bonding curve fee.
+ 
+ import asyncio
+ import base64
++import os
+ import time
+ 
+ import aiohttp
+@@ -35,6 +36,11 @@ class PumpPortalExecutor:
+     """
+ 
+     def __init__(self, keypair: Keypair):
++        if os.getenv("PAPER_COMPARE_LOCK") == "1":
++            raise RuntimeError(
++                "PAPER_COMPARE_LOCK=1 refuses PumpPortalExecutor(). "
++                "The paper comparison must not sign or send transactions."
++            )
+         self.keypair = keypair
+         self.pubkey  = keypair.pubkey()
+         self.session = None
+@@ -249,15 +255,15 @@ class PumpPortalExecutor:
+             return None
+ 
+     async def _sign_and_send(self, tx_bytes: bytes) -> str | None:
+-        """
+-        Sign the PumpPortal-built tx and race-submit it across every
+-        configured RPC. The same signature is valid on all of them — first
+-        successful response wins, the rest are harmless duplicate sends
+-        that the network deduplicates by signature.
++        """Sign the PumpPortal-built tx and race-submit it across every RPC.
+ 
+-        Drops Stage-3 tail latency: single-RPC submission stalls were
+-        the long pole when the leader RPC was congested or slow.
++        The same signature is valid on all of them. First successful response
++        wins. Refused entirely when PAPER_COMPARE_LOCK=1.
+         """
++        if os.getenv("PAPER_COMPARE_LOCK") == "1":
++            raise RuntimeError(
++                "PAPER_COMPARE_LOCK=1 refuses PumpPortalExecutor._sign_and_send."
++            )
+         try:
+             raw_tx = VersionedTransaction.from_bytes(tx_bytes)
+             signed = VersionedTransaction(raw_tx.message, [self.keypair])
+diff --git a/trader/wallet.py b/trader/wallet.py
+index e94f233..33bd6c6 100644
+--- a/trader/wallet.py
++++ b/trader/wallet.py
+@@ -4,6 +4,7 @@ Solana wallet setup, balance checking, and keypair management.
+ Uses solders for keypair handling and aiohttp for RPC calls.
+ """
+ 
++import os
+ import time
+ 
+ import aiohttp
+@@ -11,6 +12,14 @@ import base58
+ from loguru import logger
+ from solders.keypair import Keypair
+ 
++
++def _refuse_paper_compare(action: str) -> None:
++    if os.getenv("PAPER_COMPARE_LOCK") == "1":
++        raise RuntimeError(
++            f"PAPER_COMPARE_LOCK=1 refuses {action}. "
++            "The paper comparison must not load a keypair."
++        )
++
+ from config import PRIVATE_KEY, RPC_URL
+ 
+ 
+@@ -18,6 +27,7 @@ class SolanaWallet:
+     """Manages keypair and SOL/token balance queries."""
+ 
+     def __init__(self):
++        _refuse_paper_compare("SolanaWallet()")
+         self.keypair = self._load_keypair()
+         self.pubkey  = self.keypair.pubkey()
+         self.session: aiohttp.ClientSession = None
+@@ -31,6 +41,7 @@ class SolanaWallet:
+ 
+     def _load_keypair(self) -> Keypair:
+         """Load keypair from base58 private key string."""
++        _refuse_paper_compare("keypair load")
+         try:
+             secret = base58.b58decode(PRIVATE_KEY)
+             return Keypair.from_bytes(secret)
