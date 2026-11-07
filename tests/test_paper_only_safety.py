@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -324,6 +325,89 @@ def test_missing_risk_reads_are_not_clean_entries(tmp_path, monkeypatch):
     summary = (tmp_path / "logs" / "compare_buckets.json").read_text(encoding="utf-8")
     assert "blocked_missing_risk" in summary
     assert '"clean"' in summary
+
+
+def test_wall_jump_is_a_freeze_and_not_a_feed_gap():
+    health = FeedHealth()
+    health._last_wall = time.time() - 631
+    health._last_beat = time.monotonic() - 1.0
+    rec = health.heartbeat()
+    assert rec is not None
+    assert rec["clock"] == "wall"
+    assert rec["stall_s"] >= 300
+    assert rec["flatten"] is True
+    assert health.consume_flatten() is True
+    health.note_ws_message()
+    assert health.note_ws_message() is None
+
+
+def test_refresh_age_does_not_invent_market_fields():
+    from paper_only.scoring import refresh_score_age
+
+    token = {"created_ts": 1_000.0, "age_minutes": 0, "bonding_curve_pct": 29.41}
+    age = refresh_score_age(token, now=1_000.0 + 120)
+    assert age == pytest.approx(2.0)
+    assert token["age_source"] == "wall_since_create"
+    assert token["bonding_curve_pct"] == 29.41
+    assert "price_change_5m" not in token
+    assert "dex_pair_address" not in token
+    assert refresh_score_age({"age_minutes": 0}, now=5) is None
+
+
+def test_rescore_only_when_data_can_still_arrive():
+    from paper_only.scoring import should_rescore
+
+    low = {"reject_reason": "score_40"}
+    unread = {"reject_reason": "holder_data_unavailable"}
+    permanent = {"reject_reason": "big_init_buy_4.94sol"}
+    bought = {"reject_reason": "score_70", "paper_buy_queued": True}
+    assert should_rescore(low, 1, elapsed_s=20) is True
+    assert should_rescore(unread, 2, elapsed_s=40) is True
+    assert should_rescore(permanent, 1, elapsed_s=20) is False
+    assert should_rescore(bought, 1, elapsed_s=20) is False
+    assert should_rescore(low, 8, elapsed_s=20) is False
+    assert should_rescore(low, 1, elapsed_s=601) is False
+
+
+def test_diagnostics_mark_missing_inputs_and_not_reached_risk(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from paper_only.scoring import input_availability, write_diagnostic
+
+    token = {
+        "mint": "MintDiag",
+        "symbol": "DIAG",
+        "score": 40,
+        "raw_score": 40,
+        "reject_reason": "score_40",
+        "age_source": "wall_since_create",
+        "age_minutes": 0.25,
+        "score_breakdown": {
+            "creator": 22,
+            "bonding_curve": 8,
+            "community": 5,
+            "price_momentum": 5,
+        },
+    }
+    avail = input_availability(token)
+    assert avail["dex"] == "unavailable"
+    assert avail["price_change_5m"] == "default_zero"
+    assert avail["pumpfun_tracker"] == "unavailable"
+    assert avail["holder_check"] == "not_reached"
+    assert avail["freeze_check"] == "not_reached"
+    write_diagnostic(token, attempt=1)
+    text = (tmp_path / "logs" / "score_diagnostics.jsonl").read_text(encoding="utf-8")
+    assert "score_40" in text
+    assert "unavailable" in text
+    assert "not_reached" in text
+
+
+def test_tracker_deadline_clock_under_lock(monkeypatch):
+    from detector.pumpfun_tracker import deadline_clock
+
+    monkeypatch.delenv("PAPER_COMPARE_LOCK", raising=False)
+    assert deadline_clock() is time.time
+    monkeypatch.setenv("PAPER_COMPARE_LOCK", "1")
+    assert deadline_clock() is time.monotonic
 
 
 def test_holder_read_failure_returns_none():

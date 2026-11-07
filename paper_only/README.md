@@ -111,6 +111,35 @@ approximation is disclosed here. It does not turn the run into a
 different strategy, and it does not mark those names as validated clean
 when the holder or freeze read itself failed.
 
+### What the no-trade fix changes, and what it does not
+
+The score threshold stays 60. The four-factor math is the upstream
+function. A create event is still scored from its launch snapshot, which
+by itself tops out below 60 for a normal virtual curve near 29% with no
+DexScreener pair and no tracker replies. That rejection is the strategy.
+
+Three data-flow bugs were hiding whether a later real input could pass
+the same rules:
+
+- `age_minutes` stayed 0, so the existing DexScreener call (age over
+  0.5 minutes) never ran and the fresh-token score floors never expired.
+  Age is now wall time since the create event. Curve percent and market
+  cap stay the launch snapshot. Missing dex or tracker fields stay at
+  the scorer's defaults and are logged as unavailable, not filled in.
+- A below-threshold or unread-risk result is rescored up to 8 times
+  across 10 minutes. Permanent rejects (blacklist, missing symbol, big
+  initial buy, a freeze authority that was actually set, holder
+  concentration over the limit) are not retried. The holder and freeze
+  gates still fail closed on every pass.
+- A wall-clock jump that monotonic time does not include is recorded as
+  a `clock=wall` freeze and can pause entries or flatten. Feed-silence
+  gaps stay on the monotonic clock. This does not stop the host from
+  suspending.
+
+Each pass appends `logs/score_diagnostics.jsonl` and a `[SCORE PARTS]`
+line with the four factors and whether dex, the pump.fun tracker, the
+holder read, and the freeze read were present, defaulted, or not reached.
+
 ### Frozen rules versus the README table
 
 `config.py` at the pinned commit is what the scorer and risk manager

@@ -24,6 +24,7 @@ class FeedHealth:
     def __init__(self) -> None:
         now = time.monotonic()
         self._last_beat = now
+        self._last_wall = time.time()
         self._last_ws = now
         self._ws_armed = False
         self._seq = 0
@@ -32,7 +33,13 @@ class FeedHealth:
         self.freezes: list[dict] = []
         self.gaps: list[dict] = []
 
-    def observe_stall(self, stall_s: float, *, wall_end: float | None = None) -> dict | None:
+    def observe_stall(
+        self,
+        stall_s: float,
+        *,
+        wall_end: float | None = None,
+        clock: str = "monotonic",
+    ) -> dict | None:
         if stall_s < FREEZE_DETECT_S:
             return None
         self._seq += 1
@@ -40,6 +47,7 @@ class FeedHealth:
         rec = {
             "id": self._seq,
             "kind": "host_freeze",
+            "clock": clock,
             "stall_s": round(float(stall_s), 3),
             "wall_start": end - float(stall_s),
             "wall_end": end,
@@ -52,10 +60,26 @@ class FeedHealth:
         return rec
 
     def heartbeat(self) -> dict | None:
-        now = time.monotonic()
-        elapsed = now - self._last_beat
-        self._last_beat = now
-        return self.observe_stall(elapsed - HEARTBEAT_INTERVAL_S)
+        """Record a late wake.
+
+        ``stall`` from ``time.monotonic`` catches an event-loop stall while
+        the process is scheduled. A suspension or wall-clock step advances
+        ``time.time`` without advancing monotonic, so the extra wall elapsed
+        is recorded separately. Recording it does not unsuspend the host.
+        Feed-silence gaps stay on the monotonic clock so a wall jump is not
+        also called a market-data gap.
+        """
+        mono = time.monotonic()
+        wall = time.time()
+        mono_elapsed = mono - self._last_beat
+        wall_elapsed = wall - self._last_wall
+        self._last_beat = mono
+        self._last_wall = wall
+        mono_stall = mono_elapsed - HEARTBEAT_INTERVAL_S
+        wall_extra = wall_elapsed - max(mono_elapsed, 0.0)
+        if wall_extra >= FREEZE_DETECT_S and wall_extra >= mono_stall:
+            return self.observe_stall(wall_extra, wall_end=wall, clock="wall")
+        return self.observe_stall(mono_stall, wall_end=wall, clock="monotonic")
 
     def note_ws_message(self) -> dict | None:
         now = time.monotonic()

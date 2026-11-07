@@ -115,6 +115,9 @@ def _write_pin(repo: Path) -> None:
             "Bundle detection still treats a quiet trade window as not bundled. If PumpPortal omits trade events, that classification is incomplete and is not a second strategy.",
             "Twitter, Telegram, email, the web dashboard, and the graduation sniper are not started.",
             "Buy cooldown remains 15 seconds, from upstream config.",
+            "Age is recomputed from the create timestamp under the paper lock so the existing dex path and fresh-token floors see real age. Curve and market cap stay the launch snapshot. Missing dex or tracker data stays at the scorer defaults and is logged as unavailable.",
+            "Candidates rejected for score or unread holder/freeze data are rescored up to 8 times over 10 minutes. The score threshold is not lowered. Permanent rejects are not retried.",
+            "A wall-clock jump that monotonic time does not include is recorded as a wall freeze. That accounts for the gap. It does not stop the host from suspending.",
         ],
     }
     try:
@@ -249,7 +252,6 @@ async def launch(state_dir: Path) -> None:
     from loguru import logger
 
     from analyzer.regime_filter import regime_filter
-    from analyzer.signal_scorer import SignalScorer
     from config import (
         MAX_OPEN_POSITIONS,
         MAX_SOL_PER_TRADE,
@@ -263,6 +265,7 @@ async def launch(state_dir: Path) -> None:
     from detector.whale_tracker import whale_tracker
     from paper_only.executor import ComparisonPaperExecutor
     from paper_only.logging_setup import setup_logging
+    from paper_only.scoring import BuyMarkQueue, PaperSignalScorer
     from risk.manager import RiskManager
     from trader.paper_wallet import PaperWallet
 
@@ -289,13 +292,13 @@ async def launch(state_dir: Path) -> None:
             await super()._handle_message(raw)
 
     raw_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
-    trade_queue: asyncio.Queue = asyncio.Queue(maxsize=50)
+    trade_queue: asyncio.Queue = BuyMarkQueue(asyncio.Queue(maxsize=50))
     wallet = PaperWallet(PAPER_STARTING_SOL)
     executor = ComparisonPaperExecutor(wallet)
     compare_cls = _make_risk_class(RiskManager, book)
     risk = compare_cls(wallet, executor)
     await risk.initialize()
-    scorer = SignalScorer(raw_queue, trade_queue, executor=executor)
+    scorer = PaperSignalScorer(raw_queue, trade_queue, executor=executor)
     monitor = _ObservedMonitor(raw_queue)
     tracker = PumpFunTracker(monitor=monitor)
     wallet_intel.attach(monitor)

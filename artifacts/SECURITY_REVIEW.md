@@ -6,6 +6,15 @@ closed while `PAPER_COMPARE_LOCK=1`. A missing read is logged under
 (0.1 principal + 0.001 fee + 0.0005 priority), not a 0.1 SOL total input.
 The inert tree is `artifacts/paper-comparison-runtime.tar.gz`.
 
+Data-flow update: age is wall time since create, so the existing
+DexScreener path can run after 30 seconds. Candidates below 60, or
+blocked because holder/freeze data was unread, are rescored up to 8
+times in 10 minutes. The threshold stays 60. Curve and market cap stay
+the launch snapshot. Missing inputs are logged in
+`logs/score_diagnostics.jsonl` and are not filled in. A wall-clock jump
+that monotonic time misses is recorded as `clock=wall`. That does not
+unsuspend the host.
+
 
 
 Review date: 2026-11-06 (America/New_York).

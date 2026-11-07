@@ -92,6 +92,14 @@ class SignalScorer:
             if BUY_COOLDOWN_SECONDS > 0:
                 await asyncio.sleep(BUY_COOLDOWN_SECONDS)
 
+            # The monitor stamps age_minutes=0 and never updates it, so the
+            # dex path (age > 0.5 min) never ran and the fresh-token floors
+            # stayed on forever. Under the paper lock, age is wall time since
+            # the create event. Missing created_ts is left unchanged and marked.
+            if os.getenv("PAPER_COMPARE_LOCK") == "1":
+                from paper_only.scoring import refresh_score_age
+                refresh_score_age(token)
+
             # ── Parallel I/O: kick off DEX enrichment NOW so it runs alongside
             # the bundle wait (~5s blocking) instead of stacking serially after.
             # Saves up to ~1s per token on busy mints.

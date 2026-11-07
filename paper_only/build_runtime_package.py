@@ -63,6 +63,7 @@ RUNTIME_FILES = [
     "paper_only/prices.py",
     "paper_only/risk_gate.py",
     "paper_only/runner.py",
+    "paper_only/scoring.py",
     "paper_only/selfcheck.py",
     "paper_only/sizing.py",
     "tests/__init__.py",
