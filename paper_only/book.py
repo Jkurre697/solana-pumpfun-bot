@@ -21,6 +21,7 @@ class CompareBook:
         self.health = health
         self._opens: dict[str, dict] = {}
         self.counts = {name: {"n": 0, "risk_pnl_sol": 0.0, "cash_pnl_sol": 0.0} for name in _BUCKETS}
+        self.blocked = {"n": 0, "by_reason": {}}
 
     def on_open(self, mint: str, result: dict) -> None:
         self._opens[mint] = {
@@ -70,6 +71,29 @@ class CompareBook:
         with open("logs/compare_trades.jsonl", "a", encoding="utf-8") as handle:
             handle.write(json.dumps(tagged) + "\n")
 
+    def note_blocked(self, token: dict, reason: str) -> None:
+        """Record an entry that never opened because a risk read was missing.
+
+        These rows are not trades and are not in the clean bucket.
+        """
+        self.blocked["n"] += 1
+        reasons = self.blocked["by_reason"]
+        reasons[reason] = int(reasons.get(reason, 0)) + 1
+        os.makedirs("logs", exist_ok=True)
+        row = {
+            "mint": token.get("mint"),
+            "symbol": token.get("symbol"),
+            "reason": reason,
+            "holder_check": token.get("holder_check"),
+            "freeze_check": token.get("freeze_check"),
+            "ts": time.time(),
+            "counts_as_trade": False,
+            "bucket": "blocked_missing_risk",
+        }
+        with open("logs/blocked_entries.jsonl", "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+        self.write_summary()
+
     def write_summary(self) -> None:
         os.makedirs("logs", exist_ok=True)
         payload = {
@@ -80,6 +104,11 @@ class CompareBook:
                 "does not include those entry debits."
             ),
             "buckets": self.counts,
+            "blocked_missing_risk": self.blocked,
+            "blocked_missing_risk_note": (
+                "Not trades. Holder or freeze-authority data was missing, "
+                "so the entry was refused. Do not add these to clean pnl."
+            ),
             "open_positions": len(self._opens),
         }
         tmp = "logs/compare_buckets.json.tmp"

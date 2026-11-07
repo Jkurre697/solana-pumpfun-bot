@@ -37,6 +37,7 @@ from paper_only.frozen import (
     UPSTREAM_REPO,
 )
 from paper_only.net_guard import install_import_blocker, install_network_guard
+from paper_only.risk_gate import entry_block_reason
 from paper_only.sizing import fixed_entry_size
 
 _BASELINE_NAME = "pumpfun-sniper"
@@ -74,10 +75,16 @@ def _write_pin(repo: Path) -> None:
         "entry_sol": 0.1,
         "compounding": False,
         "costs": {
+            "curve_principal_sol": 0.1,
             "fee_rate_per_side": 0.01,
             "adverse_slippage_per_side": 0.02,
             "priority_sol_per_tx": 0.0005,
-            "fee_accounting": "fee and priority are extra cash debits on entry, not taken out of the 0.1",
+            "entry_cash_debit_sol": 0.1015,
+            "fee_accounting": (
+                "0.1 SOL is curve principal. Entry cash is 0.1 + 0.001 fee "
+                "+ 0.0005 priority = 0.1015 SOL. This is not a 0.1 SOL total "
+                "input, and fills are not claimed to match the baseline."
+            ),
         },
         "feeds": {
             "launches": "wss://pumpportal.fun/api/data subscribeNewToken (public, no key)",
@@ -104,7 +111,8 @@ def _write_pin(repo: Path) -> None:
             "Upstream realistic paper sim (MEV tax, 5% fail rate, size slippage, 0.001/0.005 priority caps) is not used.",
             "Exit-latency and stampede sampling from trader.paper_executor are not used.",
             "Jupiter quotes are not used after migration. DexScreener is the fallback.",
-            "Holder-concentration reads use the public RPC and fail open on errors, which is upstream behavior.",
+            "Holder concentration and freeze authority must both be read successfully or the entry is blocked and logged under blocked_missing_risk, not as a clean trade. Upstream without this lock still fail-opens those reads.",
+            "Bundle detection still treats a quiet trade window as not bundled. If PumpPortal omits trade events, that classification is incomplete and is not a second strategy.",
             "Twitter, Telegram, email, the web dashboard, and the graduation sniper are not started.",
             "Buy cooldown remains 15 seconds, from upstream config.",
         ],
@@ -163,6 +171,10 @@ async def _trade_loop(trade_queue, executor, risk, health: FeedHealth, book: Com
         symbol = token.get("symbol", "???")
         creator = token.get("creator", "")
         if creator and creator in CREATOR_BLACKLIST:
+            continue
+        blocked = entry_block_reason(token)
+        if blocked:
+            book.note_blocked(token, blocked)
             continue
         score = int(token.get("score") or 0)
         sol_amount, _reason = await fixed_entry_size(risk, score, symbol)
@@ -249,8 +261,8 @@ async def launch(state_dir: Path) -> None:
     from detector.pumpfun_tracker import PumpFunTracker
     from detector.wallet_intel import wallet_intel
     from detector.whale_tracker import whale_tracker
-    from logger.dashboard import setup_logging
     from paper_only.executor import ComparisonPaperExecutor
+    from paper_only.logging_setup import setup_logging
     from risk.manager import RiskManager
     from trader.paper_wallet import PaperWallet
 

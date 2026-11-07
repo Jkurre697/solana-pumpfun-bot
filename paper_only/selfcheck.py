@@ -19,30 +19,45 @@ def run_self_check() -> int:
     assert config.HELIUS_API_KEY == ""
     assert config.TWITTER_BEARER_TOKEN == ""
     assert buy_fill(1e-8)["tokens"] > 0
+    assert abs(buy_fill(1e-8)["cash_debit"] - 0.1015) < 1e-12
 
-    from trader.wallet import SolanaWallet
+    from paper_only.risk_gate import entry_block_reason
 
-    try:
-        SolanaWallet()
-    except RuntimeError as exc:
-        if "PAPER_COMPARE_LOCK" not in str(exc):
-            raise
-    else:
-        raise RuntimeError("SolanaWallet constructed under the paper lock")
-
-    from trader.local_tx_builder import build_buy_tx_bytes
+    assert entry_block_reason({}) == "holder_data_unavailable"
+    assert entry_block_reason({"holder_check": "ok", "freeze_check": "unknown"}) == (
+        "freeze_authority_unknown"
+    )
+    assert entry_block_reason({"holder_check": "ok", "freeze_check": "safe"}) == ""
 
     try:
-        build_buy_tx_bytes(  # type: ignore[arg-type]
-            user=None, mint=None, sol_amount_lamports=1, v_sol_reserves=1,
-            v_token_reserves=1, slippage_bps=1, cu_limit=1,
-            cu_price_micro_lamports=1, recent_blockhash=None,
-        )
-    except RuntimeError as exc:
-        if "PAPER_COMPARE_LOCK" not in str(exc):
-            raise
+        from trader.wallet import SolanaWallet
+    except ModuleNotFoundError:
+        print("signer module trader.wallet is not in this tree")
     else:
-        raise RuntimeError("build_buy_tx_bytes ran under the paper lock")
+        try:
+            SolanaWallet()
+        except RuntimeError as exc:
+            if "PAPER_COMPARE_LOCK" not in str(exc):
+                raise
+        else:
+            raise RuntimeError("SolanaWallet constructed under the paper lock")
+
+    try:
+        from trader.local_tx_builder import build_buy_tx_bytes
+    except ModuleNotFoundError:
+        print("signer module trader.local_tx_builder is not in this tree")
+    else:
+        try:
+            build_buy_tx_bytes(  # type: ignore[arg-type]
+                user=None, mint=None, sol_amount_lamports=1, v_sol_reserves=1,
+                v_token_reserves=1, slippage_bps=1, cu_limit=1,
+                cu_price_micro_lamports=1, recent_blockhash=None,
+            )
+        except RuntimeError as exc:
+            if "PAPER_COMPARE_LOCK" not in str(exc):
+                raise
+        else:
+            raise RuntimeError("build_buy_tx_bytes ran under the paper lock")
 
     print("paper-only self-check ok")
     print("mode: upstream decision modules, isolated")

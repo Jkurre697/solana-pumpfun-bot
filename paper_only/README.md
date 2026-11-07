@@ -70,27 +70,46 @@ Two upstream limits still apply and are frozen:
 not shrink 0.1 SOL down to 0.05 SOL. That is a comparison override.
 It is recorded in `paper_only/frozen.py`.
 
-### Costs
+### Costs (not the baseline's 0.1 SOL total input)
 
-Independent of `trader/paper_executor.py`:
+Independent of `trader/paper_executor.py`. Fills are not claimed to
+match the baseline bot.
 
-| Item | Value |
-|---|---|
-| Entry notional | 0.1 SOL |
-| Fee | 1% of notional on the buy, 1% of gross proceeds on the sell |
-| Adverse slippage | 2% worse than mid, each side |
-| Priority | 0.0005 SOL per transaction |
+| Item | This harness | Baseline this is compared against |
+|---|---|---|
+| Curve principal | 0.1 SOL | described as 0.1 SOL total input |
+| Entry cash out of the paper wallet | **0.1015 SOL** = 0.1 + 1% fee (0.001) + 0.0005 priority | 0.1 SOL all-in, fees inside that 0.1 |
+| Adverse slippage | 2% worse than mid, each side | 2% worse than mid, each side |
+| Sell | gross after 2% slippage, minus 1% of that gross, minus 0.0005 | 1% and 2% and 0.0005, accounted inside the baseline's own code |
 
-The buy fee and buy priority are **extra cash debits**. They are not
-subtracted from the 0.1 before the curve fill. `RiskManager` pnl does
-not include those entry debits. `logs/compare_trades.jsonl` stores both
-`risk_pnl_sol` and `cash_pnl_sol` (risk pnl minus the allocated entry
-fee and priority).
+`RiskManager` pnl uses curve principal versus sell proceeds. It does
+not subtract the 0.001 + 0.0005 entry extras. `logs/compare_trades.jsonl`
+stores `risk_pnl_sol` and `cash_pnl_sol` (risk pnl minus those entry
+extras, allocated across partial sells).
 
-Upstream's own paper simulator is different: size-based slippage, an
-MEV add-on, a 5% random failure, and priority caps of 0.001 SOL on
+Upstream's own paper simulator is different again: size-based slippage,
+an MEV add-on, a 5% random failure, and priority caps of 0.001 SOL on
 buys and 0.005 SOL on sells. This harness does not use that simulator.
-Matching numbers to the README's paper curve would be a false claim.
+
+### Missing holder and freeze data
+
+Upstream, with the lock unset, treats a failed top-10 holder read as 0%
+and a failed freeze-authority read as safe. Those would be normal buys
+and could close in the clean bucket.
+
+This process sets `PAPER_COMPARE_LOCK` before scoring. An entry is
+opened only when `holder_check` is `ok` and `freeze_check` is `safe`.
+A timeout, an RPC error, an empty holder list, or an account that is
+not visible yet is refused. The refusal is appended to
+`logs/blocked_entries.jsonl` and counted under `blocked_missing_risk`
+in `logs/compare_buckets.json`. That counter is not a trade and is not
+part of clean pnl.
+
+Dex enrichment and the bundle window can still run without those
+fields. A quiet trade subscription can look "not bundled". That
+approximation is disclosed here. It does not turn the run into a
+different strategy, and it does not mark those names as validated clean
+when the holder or freeze read itself failed.
 
 ### Frozen rules versus the README table
 
@@ -155,7 +174,41 @@ the `grep` line above.
 `--self-check` does not open a socket and does not accept a private key.
 A `.env` that sets `PAPER_TRADING=false` must not change the result.
 
-## Launch
+## Install on the parent computer without cloning
+
+Use the archive `artifacts/paper-comparison-runtime.tar.gz` from this
+review. Do not clone the git repo for this comparison. Do not copy it
+onto the baseline bot. Nothing here installs systemd, Task Scheduler,
+or a restart loop.
+
+```bash
+mkdir -p /workspace/pumpfun-comparison
+tar -xzf paper-comparison-runtime.tar.gz -C /workspace/pumpfun-comparison
+python3 -m venv /workspace/pumpfun-comparison/venv
+/workspace/pumpfun-comparison/venv/bin/python -m pip install --upgrade pip
+/workspace/pumpfun-comparison/venv/bin/python -m pip install \
+  -r /workspace/pumpfun-comparison/paper-comparison-runtime/requirements-paper.txt
+cd /workspace/pumpfun-comparison/paper-comparison-runtime
+/workspace/pumpfun-comparison/venv/bin/python -m pytest tests/test_paper_only_safety.py
+/workspace/pumpfun-comparison/venv/bin/python -m paper_only --self-check
+```
+
+Only after both commands succeed, start the public-feed paper run.
+State and logs stay under `/workspace/pumpfun-comparison/state`, which
+is not the extracted source tree and not `pumpfun-sniper`:
+
+```bash
+/workspace/pumpfun-comparison/venv/bin/python -m paper_only \
+  --state /workspace/pumpfun-comparison/state
+```
+
+Stop with Ctrl-C. The process does not install a service.
+
+Check `CHECKSUMS.sha256` inside the archive against the files you
+extracted before installing. The review also publishes
+`artifacts/paper-comparison-runtime.sha256` for the archive itself.
+
+## Launch from a git checkout
 
 Only after `--self-check` prints `paper-only self-check ok`:
 

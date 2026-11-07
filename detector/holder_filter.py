@@ -20,10 +20,15 @@ _cache: dict = {}      # mint -> (timestamp, top10_pct)
 _CACHE_TTL = 60        # seconds
 
 
-async def get_top10_concentration(session: aiohttp.ClientSession, mint: str) -> float:
-    """
-    Returns the percentage of supply held by top 10 token accounts.
-    Returns 0 on RPC failure (treat as unknown — don't reject).
+async def get_top10_concentration(session: aiohttp.ClientSession, mint: str) -> float | None:
+    """Percentage of supply held by the top 10 token accounts.
+
+    Returns a float only when both RPC reads succeed and supply is positive.
+    Returns None when the read fails, the payload is an error, supply is
+    missing, or the largest-account list is empty. None means "not verified".
+
+    The unlocked scorer still treats None as 0 and does not reject (legacy
+    fail-open). The paper-comparison lock rejects None instead.
     """
     now = time.time()
     cached = _cache.get(mint)
@@ -54,13 +59,17 @@ async def get_top10_concentration(session: aiohttp.ClientSession, mint: str) -> 
         ) as r2:
             supply = await r2.json()
 
-        accounts = largest.get("result", {}).get("value", []) or []
-        total    = supply.get("result", {}).get("value", {}).get("amount")
-        if not accounts or not total:
-            return 0
+        if not isinstance(largest, dict) or "error" in largest or "result" not in largest:
+            return None
+        if not isinstance(supply, dict) or "error" in supply or "result" not in supply:
+            return None
+        accounts = (largest.get("result") or {}).get("value")
+        total = ((supply.get("result") or {}).get("value") or {}).get("amount")
+        if not isinstance(accounts, list) or not accounts or not total:
+            return None
         total_int = int(total)
         if total_int == 0:
-            return 0
+            return None
 
         # Sum top 10 by raw amount
         top10_amount = 0
@@ -76,10 +85,10 @@ async def get_top10_concentration(session: aiohttp.ClientSession, mint: str) -> 
         return pct
 
     except TimeoutError:
-        return 0
+        return None
     except Exception as e:
         logger.debug(f"[HOLDER] {mint[:8]} concentration check error: {e}")
-        return 0
+        return None
 
 
 def concentration_too_high(pct: float) -> bool:

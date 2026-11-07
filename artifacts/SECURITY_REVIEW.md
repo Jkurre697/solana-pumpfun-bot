@@ -1,5 +1,13 @@
 # Security and paper-comparison review
 
+Packaging update: holder-concentration and freeze-authority reads fail
+closed while `PAPER_COMPARE_LOCK=1`. A missing read is logged under
+`blocked_missing_risk` and is not a clean trade. Entry cash is 0.1015 SOL
+(0.1 principal + 0.001 fee + 0.0005 priority), not a 0.1 SOL total input.
+The inert tree is `artifacts/paper-comparison-runtime.tar.gz`.
+
+
+
 Review date: 2026-11-06 (America/New_York).
 Fork reviewed: https://github.com/Jkurre697/solana-pumpfun-bot
 Upstream: https://github.com/DeeKalshiWay/solana-pumpfun-bot
@@ -136,7 +144,8 @@ Two paper strategies live in this commit.
 The harness is **upstream decision modules, isolated**. It is not a line-by-line reimplementation of the scorer, and it is not an unmodified `main.py` run. Fidelity gaps, all stated in `paper_only/README.md` and written again into `logs/PAPER_COMPARE_PIN.json` on launch:
 
 - README ladder/stop/time-exit table disagrees with `config.py`. Frozen values are the code defaults at the pin (score floor 60, curve band 30–80%, take-profit +50/100/200 selling 25%, stop 15%, panic 25%, time exit 5 minutes, early rug −5% inside 60 seconds, no-movement 90 seconds inside ±3%, max 3 positions, 0.50 SOL exposure, symbol cap 10% of the 1.0 SOL book).
-- Entry size is forced to 0.1 SOL. `MAX_POSITION_PCT=1` is the override that stops the 5% wallet clip. Adaptive multipliers are forced to 1 and the feature is off.
+- Curve principal is 0.1 SOL. Entry cash is 0.1015 SOL (principal plus 1% fee plus 0.0005 priority). That is not the baseline's 0.1 SOL total input. Fills are not claimed to match.
+- With the lock on, holder and freeze-authority reads must succeed or the name is blocked and is not a clean trade. Upstream without the lock still fail-opens those reads.
 - Cost model is 1% per side, 2% adverse slippage per side, 0.0005 SOL priority per transaction. Upstream realistic paper friction is not used. Upstream configured live priority caps (0.001 buy / 0.005 sell) are not used.
 - Jupiter is not queried. Post-migration marks fall through to DexScreener.
 - Twitter, Telegram, email, dashboard, trending scanner, and social monitor are not started. Influencer bonuses stay at zero.
@@ -177,16 +186,22 @@ Full `pytest tests` passed in this review environment after that fallback (Pytho
 ## Parent launch, after you accept the review
 
 The comparison is not running here. Nothing has been installed as a service.
+Do not clone the repo for this run. Use the archive.
 
 ```bash
-grep -v '^playwright' requirements.txt | python3 -m pip install -r /dev/stdin
-python3 -m pip install pytest pytest-asyncio
-python3 -m pytest tests/test_paper_only_safety.py
-python3 -m paper_only --self-check
-python3 -m paper_only
+mkdir -p /workspace/pumpfun-comparison
+tar -xzf artifacts/paper-comparison-runtime.tar.gz -C /workspace/pumpfun-comparison
+python3 -m venv /workspace/pumpfun-comparison/venv
+/workspace/pumpfun-comparison/venv/bin/python -m pip install --upgrade pip
+/workspace/pumpfun-comparison/venv/bin/python -m pip install \
+  -r /workspace/pumpfun-comparison/paper-comparison-runtime/requirements-paper.txt
+cd /workspace/pumpfun-comparison/paper-comparison-runtime
+/workspace/pumpfun-comparison/venv/bin/python -m pytest tests/test_paper_only_safety.py
+/workspace/pumpfun-comparison/venv/bin/python -m paper_only --self-check
+/workspace/pumpfun-comparison/venv/bin/python -m paper_only \
+  --state /workspace/pumpfun-comparison/state
 ```
 
-Read `paper_only/README.md` before the last command. Stop with Ctrl-C.
-Results, if you choose to run it, land in `paper_compare_state/logs/`.
-Do not copy that directory onto the baseline bot, and do not reset the
-baseline's state or settings.
+Verify `CHECKSUMS.sha256` inside the archive before installing. Stop the
+feed process with Ctrl-C. It does not install a service. Do not point
+`--state` at `pumpfun-sniper`, and do not reset the baseline.

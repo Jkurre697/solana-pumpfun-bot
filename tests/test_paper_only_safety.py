@@ -307,6 +307,69 @@ def test_self_check_ignores_hostile_dotenv(tmp_path):
     assert "this-is-not-a-wallet" not in proc.stdout
 
 
+def test_missing_risk_reads_are_not_clean_entries(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    health = FeedHealth()
+    book = CompareBook(health)
+    from paper_only.risk_gate import entry_block_reason
+
+    missing = {"mint": "MintUnread", "symbol": "UNREAD"}
+    assert entry_block_reason(missing) == "holder_data_unavailable"
+    book.note_blocked(missing, "holder_data_unavailable")
+    ready = {"holder_check": "ok", "freeze_check": "safe"}
+    assert entry_block_reason(ready) == ""
+    text = (tmp_path / "logs" / "blocked_entries.jsonl").read_text(encoding="utf-8")
+    assert "holder_data_unavailable" in text
+    assert "counts_as_trade" in text
+    summary = (tmp_path / "logs" / "compare_buckets.json").read_text(encoding="utf-8")
+    assert "blocked_missing_risk" in summary
+    assert '"clean"' in summary
+
+
+def test_holder_read_failure_returns_none():
+    from detector.holder_filter import get_top10_concentration
+
+    class _Boom:
+        def post(self, *args, **kwargs):
+            raise TimeoutError("rpc down")
+
+    assert _run(get_top10_concentration(_Boom(), "MintUnreadRpc")) is None
+
+
+def test_holder_read_success_returns_pct():
+    from detector.holder_filter import get_top10_concentration
+
+    class _Resp:
+        def __init__(self, payload):
+            self.payload = payload
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def json(self):
+            return self.payload
+
+    class _Session:
+        def __init__(self):
+            self.calls = 0
+
+        def post(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _Resp({"result": {"value": [
+                    {"amount": "250"},
+                    {"amount": "750"},
+                ]}})
+            return _Resp({"result": {"value": {"amount": "1000"}}})
+
+    pct = _run(get_top10_concentration(_Session(), "MintOkConcentration"))
+    assert pct == pytest.approx(100.0)
+
+
+@pytest.mark.skipif(not (ROOT / "main.py").exists(), reason="main.py is not in the inert package")
 def test_main_refuses_to_run_under_the_lock():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)

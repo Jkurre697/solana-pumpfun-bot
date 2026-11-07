@@ -11,9 +11,16 @@ This module uses the comparison cost assumptions:
 - 2% adverse slippage per side
 - 0.0005 SOL priority fee per transaction
 
-Buy cash leaving the wallet is notional + fee + priority. The fee and
-priority are extra debits, not taken out of the 0.1. Sell cash received is
-gross after adverse slippage, minus the 1% fee, minus 0.0005 SOL.
+Cash convention, which is not the baseline's 0.1 SOL total input:
+
+- Curve principal is 0.1 SOL, after a 2% worse entry price.
+- Buy fee is 1% of that 0.1 (0.001 SOL) and priority is 0.0005 SOL.
+- Cash leaving the paper wallet on entry is 0.1015 SOL, not 0.1.
+- A baseline that spends 0.1 SOL all-in, fees included, is a different
+  fill. These numbers are not claimed to match it.
+
+Sell cash received is gross after 2% adverse slippage, minus 1% of that
+gross, minus 0.0005 SOL.
 """
 
 from __future__ import annotations
