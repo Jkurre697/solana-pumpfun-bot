@@ -21,6 +21,7 @@ so the existing signal_scorer's `social_mentions_*` terms light up.
 Richer per-mint state is exposed via get_pumpfun_state(mint).
 """
 import asyncio
+import os
 import time
 
 import aiohttp
@@ -49,6 +50,14 @@ _HEADERS = {
 # Per-mint live state, readable by the scorer via get_pumpfun_state().
 # Cleared when the tracker stops following a mint.
 _state: dict = {}
+
+
+def deadline_clock():
+    """Paper comparison uses monotonic time so a wall-clock jump cannot
+    expire the 10-minute track immediately. Unlocked runs keep time.time."""
+    if os.getenv("PAPER_COMPARE_LOCK") == "1":
+        return time.monotonic
+    return time.time
 
 
 def get_pumpfun_state(mint: str) -> dict:
@@ -115,7 +124,8 @@ class PumpFunTracker:
         async with self._sem:
             url = V3_COIN_URL.format(mint=mint)
             sym = create_data.get("symbol", "?")
-            started_at = time.time()
+            clock = deadline_clock()
+            started_at = clock()
             deadline = started_at + PUMPFUN_TRACK_MINUTES * 60
 
             prev_replies = 0
@@ -124,7 +134,7 @@ class PumpFunTracker:
             consecutive_errors = 0
 
             try:
-                while self.running and time.time() < deadline:
+                while self.running and clock() < deadline:
                     poll_count += 1
                     try:
                         snapshot = await self._fetch(url)

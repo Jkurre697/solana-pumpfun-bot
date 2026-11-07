@@ -5,6 +5,7 @@ Smart router: Jupiter for Raydium/graduated tokens, PumpPortal for bonding-curve
 
 import asyncio
 import base64
+import os
 import time
 
 import aiohttp
@@ -18,8 +19,17 @@ from trader.pumpportal_executor import PumpPortalExecutor
 MAX_PRICE_IMPACT_PCT = 40.0
 
 
+def _refuse_paper_compare(action: str) -> None:
+    if os.getenv("PAPER_COMPARE_LOCK") == "1":
+        raise RuntimeError(
+            f"PAPER_COMPARE_LOCK=1 refuses {action}. "
+            "The paper comparison must not sign or send transactions."
+        )
+
+
 class TradeExecutor:
     def __init__(self, keypair: Keypair):
+        _refuse_paper_compare("TradeExecutor()")
         self.keypair = keypair
         self.pubkey  = keypair.pubkey()
         self.session = None
@@ -83,6 +93,7 @@ class TradeExecutor:
             return None
 
     async def _sign_and_send(self, tx_base64: str) -> str | None:
+        _refuse_paper_compare("TradeExecutor._sign_and_send")
         try:
             tx_bytes = base64.b64decode(tx_base64)
             raw_tx = VersionedTransaction.from_bytes(tx_bytes)

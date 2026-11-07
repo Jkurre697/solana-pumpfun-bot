@@ -244,6 +244,9 @@ class DailyReporter:
 
     # ── Send ────────────────────────────────────────────────────────────────
     def send_report(self):
+        if os.getenv("PAPER_COMPARE_LOCK") == "1":
+            logger.info("[REPORT] email suppressed by PAPER_COMPARE_LOCK")
+            return
         if not _enabled():
             return
         stats = self._gather()

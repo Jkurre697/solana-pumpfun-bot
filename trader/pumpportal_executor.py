@@ -7,6 +7,7 @@ Free aside from Solana network fees + pump.fun's 1% bonding curve fee.
 
 import asyncio
 import base64
+import os
 import time
 
 import aiohttp
@@ -35,6 +36,11 @@ class PumpPortalExecutor:
     """
 
     def __init__(self, keypair: Keypair):
+        if os.getenv("PAPER_COMPARE_LOCK") == "1":
+            raise RuntimeError(
+                "PAPER_COMPARE_LOCK=1 refuses PumpPortalExecutor(). "
+                "The paper comparison must not sign or send transactions."
+            )
         self.keypair = keypair
         self.pubkey  = keypair.pubkey()
         self.session = None
@@ -249,15 +255,15 @@ class PumpPortalExecutor:
             return None
 
     async def _sign_and_send(self, tx_bytes: bytes) -> str | None:
-        """
-        Sign the PumpPortal-built tx and race-submit it across every
-        configured RPC. The same signature is valid on all of them — first
-        successful response wins, the rest are harmless duplicate sends
-        that the network deduplicates by signature.
+        """Sign the PumpPortal-built tx and race-submit it across every RPC.
 
-        Drops Stage-3 tail latency: single-RPC submission stalls were
-        the long pole when the leader RPC was congested or slow.
+        The same signature is valid on all of them. First successful response
+        wins. Refused entirely when PAPER_COMPARE_LOCK=1.
         """
+        if os.getenv("PAPER_COMPARE_LOCK") == "1":
+            raise RuntimeError(
+                "PAPER_COMPARE_LOCK=1 refuses PumpPortalExecutor._sign_and_send."
+            )
         try:
             raw_tx = VersionedTransaction.from_bytes(tx_bytes)
             signed = VersionedTransaction(raw_tx.message, [self.keypair])

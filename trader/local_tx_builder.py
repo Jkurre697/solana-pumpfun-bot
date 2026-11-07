@@ -46,6 +46,7 @@ WHAT'S A BEST GUESS
 from __future__ import annotations
 
 import hashlib
+import os
 import struct
 from dataclasses import dataclass
 
@@ -370,6 +371,14 @@ def _assemble_tx_bytes(
     return bytes(tx)
 
 
+def _refuse_paper_compare(action: str) -> None:
+    if os.getenv("PAPER_COMPARE_LOCK") == "1":
+        raise RuntimeError(
+            f"PAPER_COMPARE_LOCK=1 refuses {action}. "
+            "The paper comparison must not build signable transactions."
+        )
+
+
 def build_buy_tx_bytes(
     *,
     user:                    Pubkey,
@@ -386,6 +395,7 @@ def build_buy_tx_bytes(
     can either read them fresh from the PDA or use a cached snapshot.
 
     Returns serialized unsigned v0 tx bytes."""
+    _refuse_paper_compare("build_buy_tx_bytes")
     expected = expected_tokens_for_sol(v_sol_reserves, v_token_reserves, sol_amount_lamports)
     if expected <= 0:
         raise ValueError(
@@ -424,6 +434,7 @@ def build_sell_tx_bytes(
     recent_blockhash:        Hash,
 ) -> bytes:
     """End-to-end sell tx assembly. Returns serialized unsigned v0 tx bytes."""
+    _refuse_paper_compare("build_sell_tx_bytes")
     if token_amount <= 0:
         raise ValueError(f"sell with non-positive token_amount: {token_amount}")
     expected_sol  = expected_sol_for_tokens(v_sol_reserves, v_token_reserves, token_amount)

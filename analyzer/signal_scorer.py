@@ -12,6 +12,7 @@ Upgraded with open-source alpha strategies:
 import asyncio
 import datetime
 import json
+import os
 import time
 
 import aiohttp
@@ -41,7 +42,7 @@ from config import (
 # threshold comes from auto_tuner.effective_min_score().
 from detector.creator_tracker import creator_tracker
 from detector.dex_monitor import DexMonitor
-from detector.holder_filter import concentration_too_high, get_top10_concentration
+from detector.holder_filter import concentration_too_high, get_holder_read
 from detector.influencer_monitor import influencer_monitor
 from detector.pumpfun_tracker import get_pumpfun_state
 from detector.social_monitor import get_social_stats
@@ -90,6 +91,14 @@ class SignalScorer:
             # Optional validation cooldown (15s = from Chainstack research)
             if BUY_COOLDOWN_SECONDS > 0:
                 await asyncio.sleep(BUY_COOLDOWN_SECONDS)
+
+            # The monitor stamps age_minutes=0 and never updates it, so the
+            # dex path (age > 0.5 min) never ran and the fresh-token floors
+            # stayed on forever. Under the paper lock, age is wall time since
+            # the create event. Missing created_ts is left unchanged and marked.
+            if os.getenv("PAPER_COMPARE_LOCK") == "1":
+                from paper_only.scoring import refresh_score_age
+                refresh_score_age(token)
 
             # ── Parallel I/O: kick off DEX enrichment NOW so it runs alongside
             # the bundle wait (~5s blocking) instead of stacking serially after.
@@ -265,9 +274,25 @@ class SignalScorer:
 
             # Tier 2: holder concentration RPC check — done last because it's the
             # most expensive filter. If top 10 hold > threshold, it's a rug risk.
+            # Paper comparison refuses the entry when the read did not succeed.
+            # The unlocked path still treats a missing read as 0 (legacy fail-open).
             if self._rpc_session is not None:
-                pct = await get_top10_concentration(self._rpc_session, mint)
+                read = await get_holder_read(self._rpc_session, mint)
+                token["holder_detail"] = read.as_dict()
+                pct = read.pct
+                paper_lock = os.getenv("PAPER_COMPARE_LOCK") == "1"
+                if pct is None and paper_lock:
+                    token["holder_check"] = "unavailable"
+                    token["reject_reason"] = "holder_data_unavailable"
+                    logger.info(
+                        f"[FILTERED] {symbol}: holder concentration unread | {read.summary()}"
+                    )
+                    counterfactual.record_rejection(token, "holder_data_unavailable")
+                    return
+                if pct is None:
+                    pct = 0.0
                 token["top10_holder_pct"] = round(pct, 1)
+                token["holder_check"] = "ok"
                 if concentration_too_high(pct):
                     token["reject_reason"] = f"top10_{pct:.0f}pct"
                     logger.info(f"[FILTERED] {symbol}: top 10 hold {pct:.1f}% (>limit)")
@@ -278,11 +303,36 @@ class SignalScorer:
                 # holds it) can freeze your token account post-buy — locking
                 # you out of selling. Pump.fun mints typically have null freeze
                 # authority; anything else is a clear rug-vector.
-                if not await self._freeze_authority_safe(mint):
+                # Unlocked path fail-opens when the account is missing or the
+                # RPC errors. The paper lock rejects that as unknown.
+                if paper_lock:
+                    freeze_status = await self._freeze_authority_status(mint)
+                    token["freeze_check"] = freeze_status
+                    if freeze_status != "safe":
+                        reason = (
+                            "freeze_authority_set" if freeze_status == "set"
+                            else "freeze_authority_unknown"
+                        )
+                        token["reject_reason"] = reason
+                        logger.info(f"[FILTERED] {symbol}: {reason}")
+                        counterfactual.record_rejection(token, reason)
+                        return
+                elif not await self._freeze_authority_safe(mint):
                     token["reject_reason"] = "freeze_authority_set"
                     logger.info(f"[FILTERED] {symbol}: freeze authority set")
                     counterfactual.record_rejection(token, "freeze_authority_set")
                     return
+
+            if os.getenv("PAPER_COMPARE_LOCK") == "1" and (
+                token.get("holder_check") != "ok" or token.get("freeze_check") != "safe"
+            ):
+                token["reject_reason"] = token.get("reject_reason") or "holder_data_unavailable"
+                logger.info(
+                    f"[FILTERED] {symbol}: paper lock blocked entry "
+                    f"({token['reject_reason']})"
+                )
+                counterfactual.record_rejection(token, token["reject_reason"])
+                return
 
             logger.success(f"[BUY SIGNAL] {symbol} scored {score}/100 — queuing")
             await self.trade_queue.put(token)
@@ -290,13 +340,12 @@ class SignalScorer:
         except Exception as e:
             logger.error(f"Score error for {mint[:8]}: {e}")
 
-    async def _freeze_authority_safe(self, mint: str) -> bool:
-        """Returns True if the token's freeze authority is null (safe).
+    async def _freeze_authority_status(self, mint: str) -> str:
+        """Return safe, set, or unknown.
 
-        Pump.fun mints normally have a null freeze authority. If it's set,
-        whoever holds it can freeze your associated token account after the
-        buy lands — preventing you from selling. Classic honeypot rug vector.
-        Fail-open on RPC errors so a flaky RPC doesn't shut down trading.
+        unknown covers RPC errors and an account that is not visible yet.
+        The unlocked caller maps unknown to "let it through". The paper
+        comparison does not.
         """
         try:
             payload = {
@@ -307,13 +356,25 @@ class SignalScorer:
                 RPC_URL, json=payload, timeout=aiohttp.ClientTimeout(total=4)
             ) as r:
                 data = await r.json()
+            if not isinstance(data, dict) or "error" in data or "result" not in data:
+                return "unknown"
             val = (data.get("result") or {}).get("value")
             if not val:
-                return True  # account not visible yet — let it through
+                return "unknown"
             info = ((val.get("data") or {}).get("parsed") or {}).get("info") or {}
-            return info.get("freezeAuthority") in (None, "")
+            if info.get("freezeAuthority") in (None, ""):
+                return "safe"
+            return "set"
         except Exception:
-            return True  # fail-open on RPC errors
+            return "unknown"
+
+    async def _freeze_authority_safe(self, mint: str) -> bool:
+        """Legacy fail-open wrapper. Unknown reads are treated as safe.
+
+        A set freeze authority still returns False. Paper comparison does
+        not use this wrapper; it requires status == "safe".
+        """
+        return await self._freeze_authority_status(mint) != "set"
 
     # ── Hard Filters ──────────────────────────────────────────────────────────
     def _passes_hard_filters(self, token: dict) -> bool:

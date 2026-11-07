@@ -442,6 +442,13 @@ def _install_global_error_handlers():
 
 
 async def main():
+    if os.getenv("PAPER_COMPARE_LOCK") == "1":
+        logger.critical(
+            "Refusing main.py under PAPER_COMPARE_LOCK. "
+            "Use python -m paper_only from a clean checkout. "
+            "main.py can still reach live signing when PAPER_TRADING is false."
+        )
+        raise SystemExit(3)
     setup_logging()
     _install_global_error_handlers()
     _acquire_pid_lock()

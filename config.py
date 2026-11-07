@@ -16,7 +16,17 @@ git commit needed.
 import json
 import os
 
-from dotenv import load_dotenv
+# paper_only sets PAPER_COMPARE_LOCK before import. A nearby .env must not
+# be able to flip PAPER_TRADING or inject SOLANA_PRIVATE_KEY into that process.
+_PAPER_COMPARE_LOCK = os.getenv("PAPER_COMPARE_LOCK") == "1"
+if _PAPER_COMPARE_LOCK:
+    os.environ["PAPER_TRADING"] = "true"
+    os.environ["SOLANA_PRIVATE_KEY"] = ""
+
+    def load_dotenv(*_args, **_kwargs):
+        return False
+else:
+    from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
