@@ -42,7 +42,7 @@ from config import (
 # threshold comes from auto_tuner.effective_min_score().
 from detector.creator_tracker import creator_tracker
 from detector.dex_monitor import DexMonitor
-from detector.holder_filter import concentration_too_high, get_top10_concentration
+from detector.holder_filter import concentration_too_high, get_holder_read
 from detector.influencer_monitor import influencer_monitor
 from detector.pumpfun_tracker import get_pumpfun_state
 from detector.social_monitor import get_social_stats
@@ -277,12 +277,16 @@ class SignalScorer:
             # Paper comparison refuses the entry when the read did not succeed.
             # The unlocked path still treats a missing read as 0 (legacy fail-open).
             if self._rpc_session is not None:
-                pct = await get_top10_concentration(self._rpc_session, mint)
+                read = await get_holder_read(self._rpc_session, mint)
+                token["holder_detail"] = read.as_dict()
+                pct = read.pct
                 paper_lock = os.getenv("PAPER_COMPARE_LOCK") == "1"
                 if pct is None and paper_lock:
                     token["holder_check"] = "unavailable"
                     token["reject_reason"] = "holder_data_unavailable"
-                    logger.info(f"[FILTERED] {symbol}: holder concentration unread")
+                    logger.info(
+                        f"[FILTERED] {symbol}: holder concentration unread | {read.summary()}"
+                    )
                     counterfactual.record_rejection(token, "holder_data_unavailable")
                     return
                 if pct is None:

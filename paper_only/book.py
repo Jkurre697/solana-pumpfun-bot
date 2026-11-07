@@ -21,7 +21,13 @@ class CompareBook:
         self.health = health
         self._opens: dict[str, dict] = {}
         self.counts = {name: {"n": 0, "risk_pnl_sol": 0.0, "cash_pnl_sol": 0.0} for name in _BUCKETS}
-        self.blocked = {"n": 0, "by_reason": {}}
+        self._blocked_mints: dict[str, set[str]] = {}
+        self.blocked = {
+            "passes": 0,
+            "distinct_mints": 0,
+            "n": 0,
+            "by_reason": {},
+        }
 
     def on_open(self, mint: str, result: dict) -> None:
         self._opens[mint] = {
@@ -76,9 +82,21 @@ class CompareBook:
 
         These rows are not trades and are not in the clean bucket.
         """
-        self.blocked["n"] += 1
-        reasons = self.blocked["by_reason"]
-        reasons[reason] = int(reasons.get(reason, 0)) + 1
+        self.blocked["passes"] += 1
+        self.blocked["n"] = self.blocked["passes"]
+        mint = str(token.get("mint") or "")
+        seen = self._blocked_mints.setdefault(reason, set())
+        if mint:
+            seen.add(mint)
+        distinct = set()
+        for mints in self._blocked_mints.values():
+            distinct.update(mints)
+        self.blocked["distinct_mints"] = len(distinct)
+        prior = self.blocked["by_reason"].get(reason) or {}
+        self.blocked["by_reason"][reason] = {
+            "passes": int(prior.get("passes", 0)) + 1,
+            "distinct_mints": len(seen),
+        }
         os.makedirs("logs", exist_ok=True)
         row = {
             "mint": token.get("mint"),
@@ -106,8 +124,9 @@ class CompareBook:
             "buckets": self.counts,
             "blocked_missing_risk": self.blocked,
             "blocked_missing_risk_note": (
-                "Not trades. Holder or freeze-authority data was missing, "
-                "so the entry was refused. Do not add these to clean pnl."
+                "Not trades. passes counts scoring passes refused for missing "
+                "holder or freeze data. distinct_mints counts unique mints. "
+                "n is passes, not mints. Do not add these to clean pnl."
             ),
             "open_positions": len(self._opens),
         }

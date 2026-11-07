@@ -140,6 +140,15 @@ Each pass appends `logs/score_diagnostics.jsonl` and a `[SCORE PARTS]`
 line with the four factors and whether dex, the pump.fun tracker, the
 holder read, and the freeze read were present, defaulted, or not reached.
 
+A holder refusal keeps the HTTP status and RPC message (`[HOLDER READ]`).
+The only endpoint used is the configured public RPC. A 429 starts a
+one-minute backoff and does not try another host. While that read is
+unavailable the entry stays fail-closed, and `compare_buckets.json`
+counts those refusals as `passes` and `distinct_mints`. That counter
+does not make the read succeed, and it does not by itself create trades.
+`logs/run_phase.json` marks logs from this process so they stay separate
+from an older state directory.
+
 ### Frozen rules versus the README table
 
 `config.py` at the pinned commit is what the scorer and risk manager

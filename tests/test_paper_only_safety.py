@@ -410,8 +410,104 @@ def test_tracker_deadline_clock_under_lock(monkeypatch):
     assert deadline_clock() is time.monotonic
 
 
+def test_holder_429_is_recorded_and_not_rerouted():
+    from detector.holder_filter import get_holder_read, reset_holder_backoff_for_tests
+
+    reset_holder_backoff_for_tests()
+    body = (
+        '{"jsonrpc":"2.0","error":{"code":429,'
+        '"message":"Too many requests for a specific RPC call"},"id":1}'
+    )
+
+    class _Resp:
+        status = 429
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def text(self):
+            return body
+
+    class _Session:
+        def __init__(self):
+            self.urls = []
+
+        def post(self, url, **kwargs):
+            self.urls.append(url)
+            return _Resp()
+
+    session = _Session()
+    first = _run(get_holder_read(session, "MintRate"))
+    assert first.pct is None
+    assert first.http_status == 429
+    assert first.rpc_code == 429
+    assert "specific RPC call" in first.rpc_message
+    assert len(session.urls) == 1
+    assert "publicnode" not in session.urls[0]
+    second = _run(get_holder_read(session, "MintRate2"))
+    assert second.skipped_call is True
+    assert second.pct is None
+    assert len(session.urls) == 1
+    reset_holder_backoff_for_tests()
+
+
+def test_holder_math_keeps_protocol_account_and_parses_errors():
+    from detector.holder_filter import interpret_rpc_body, top10_concentration_pct
+
+    pct = top10_concentration_pct(
+        [{"amount": "900"}, {"amount": "100"}],
+        1000,
+    )
+    assert pct == pytest.approx(100.0)
+    assert top10_concentration_pct([], 1000) is None
+    failed = interpret_rpc_body(
+        200,
+        '{"jsonrpc":"2.0","error":{"code":-32602,"message":"not a token mint"},"id":1}',
+        host="api.mainnet-beta.solana.com",
+    )
+    assert failed is not None and failed.pct is None
+    assert failed.rpc_code == -32602
+    ok = interpret_rpc_body(
+        200,
+        '{"jsonrpc":"2.0","result":{"value":[]},"id":1}',
+        host="api.mainnet-beta.solana.com",
+    )
+    assert ok is None
+
+
+def test_missing_risk_counter_counts_passes_and_mints(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    book = CompareBook(FeedHealth())
+    book.note_blocked(
+        {"mint": "MintA", "symbol": "A", "holder_check": "unavailable"},
+        "holder_data_unavailable",
+    )
+    book.note_blocked(
+        {"mint": "MintA", "symbol": "A", "holder_check": "unavailable"},
+        "holder_data_unavailable",
+    )
+    book.note_blocked(
+        {"mint": "MintB", "symbol": "B", "holder_check": "unavailable"},
+        "holder_data_unavailable",
+    )
+    assert book.blocked["passes"] == 3
+    assert book.blocked["n"] == 3
+    assert book.blocked["distinct_mints"] == 2
+    reason = book.blocked["by_reason"]["holder_data_unavailable"]
+    assert reason["passes"] == 3
+    assert reason["distinct_mints"] == 2
+    text = (tmp_path / "logs" / "compare_buckets.json").read_text(encoding="utf-8")
+    assert '"passes": 3' in text
+    assert '"distinct_mints": 2' in text
+
+
 def test_holder_read_failure_returns_none():
-    from detector.holder_filter import get_top10_concentration
+    from detector.holder_filter import get_top10_concentration, reset_holder_backoff_for_tests
+
+    reset_holder_backoff_for_tests()
 
     class _Boom:
         def post(self, *args, **kwargs):
@@ -421,7 +517,9 @@ def test_holder_read_failure_returns_none():
 
 
 def test_holder_read_success_returns_pct():
-    from detector.holder_filter import get_top10_concentration
+    from detector.holder_filter import get_top10_concentration, reset_holder_backoff_for_tests
+
+    reset_holder_backoff_for_tests()
 
     class _Resp:
         def __init__(self, payload):

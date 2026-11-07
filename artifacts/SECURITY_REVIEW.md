@@ -15,6 +15,14 @@ the launch snapshot. Missing inputs are logged in
 that monotonic time misses is recorded as `clock=wall`. That does not
 unsuspend the host.
 
+Holder-read update: `getTokenLargestAccounts` stays on the configured
+public RPC. HTTP status and the RPC error message are logged. A 429
+backs off for 60 seconds and does not try another host. Top-10
+concentration still sums every account the RPC returns, including a
+pump.fun bonding-curve token account. `compare_buckets.json` counts
+those refusals as passes and distinct mints. A recorded refusal is not
+a trade.
+
 
 
 Review date: 2026-11-06 (America/New_York).

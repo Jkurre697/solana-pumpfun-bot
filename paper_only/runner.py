@@ -140,6 +140,22 @@ def _write_pin(repo: Path) -> None:
         json.dump(pin, handle, indent=2)
 
 
+def _write_run_phase() -> None:
+    """Mark logs from this process so they are not mixed with an older run."""
+    os.makedirs("logs", exist_ok=True)
+    payload = {
+        "phase": "holder-risk-diagnostics",
+        "strategy_commit": SOURCE_COMMIT,
+        "note": (
+            "Holder refusals record the public RPC status and are counted "
+            "as passes and distinct mints. A rate limit stays fail-closed. "
+            "This file does not repair host suspension."
+        ),
+    }
+    with open("logs/run_phase.json", "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+
+
 def _acquire_pid() -> None:
     os.makedirs("logs", exist_ok=True)
     path = "logs/paper_compare.pid"
@@ -299,6 +315,8 @@ async def launch(state_dir: Path) -> None:
     risk = compare_cls(wallet, executor)
     await risk.initialize()
     scorer = PaperSignalScorer(raw_queue, trade_queue, executor=executor)
+    scorer.attach_reject_book(book)
+    _write_run_phase()
     monitor = _ObservedMonitor(raw_queue)
     tracker = PumpFunTracker(monitor=monitor)
     wallet_intel.attach(monitor)

@@ -98,6 +98,7 @@ def input_availability(token: dict) -> dict:
         "curve_source": "launch_snapshot",
         "holder_check": holder if holder else "not_reached",
         "freeze_check": freeze if freeze else "not_reached",
+        "holder_detail": token.get("holder_detail") or {},
         "reject_reason": token.get("reject_reason") or "",
     }
 
@@ -153,6 +154,16 @@ def write_diagnostic(token: dict, *, attempt: int) -> dict:
         inputs["age_minutes"],
         inputs["reject_reason"] or "-",
     )
+    detail = inputs.get("holder_detail") or {}
+    if detail:
+        logger.info(
+            "[HOLDER READ] {} | http={} rpc={} host={} msg={}",
+            token.get("symbol"),
+            detail.get("http_status"),
+            detail.get("rpc_code"),
+            detail.get("endpoint_host") or "-",
+            detail.get("rpc_message") or "-",
+        )
     try:
         os.makedirs("logs", exist_ok=True)
         with open("logs/score_diagnostics.jsonl", "a", encoding="utf-8") as handle:
@@ -170,6 +181,11 @@ class PaperSignalScorer(SignalScorer):
         self._attempts: dict[str, int] = {}
         self._first_mono: dict[str, float] = {}
         self._buy_once: set[str] = set()
+        self.reject_book = None
+
+    def attach_reject_book(self, book) -> None:
+        """Count scorer-side missing-risk rejects. The trade loop never sees them."""
+        self.reject_book = book
 
     async def _score_token(self, token: dict):
         mint = str(token.get("mint") or "")
@@ -184,6 +200,12 @@ class PaperSignalScorer(SignalScorer):
         if token.get("paper_buy_queued") and mint:
             self._buy_once.add(mint)
         write_diagnostic(token, attempt=attempt)
+        reason = str(token.get("reject_reason") or "")
+        if self.reject_book is not None and reason in (
+            "holder_data_unavailable",
+            "freeze_authority_unknown",
+        ):
+            self.reject_book.note_blocked(token, reason)
         if mint and should_rescore(
             token,
             attempt,
